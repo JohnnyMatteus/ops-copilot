@@ -75,20 +75,18 @@ make audit       # lista a trilha de auditoria no MinIO
 
 **Modo ecossistema.** `make up-portfolio` cria a rede `portfolio-net` e sobe só o núcleo, observando o Prometheus e o Jaeger dos outros projetos (`PORTFOLIO_PROMETHEUS_URL` e `PORTFOLIO_JAEGER_URL`).
 
-**Aprovação humana.**
+**Operadores e aprovação humana.** Cada pessoa tem um token (`OPERATOR_TOKENS`, ADR 0012) ou entra por OIDC; a identidade vem da credencial e assina a trilha. Recusar e cancelar exigem motivo (ADR 0013).
 
 ```bash
-curl -s localhost:8080/approvals -H "Authorization: Bearer $APPROVAL_TOKEN"
-curl -s -X POST localhost:8080/approvals/<id> -H "Authorization: Bearer $APPROVAL_TOKEN" \
-  -H 'Content-Type: application/json' -d '{"approver":"plantonista@example.com","decision":"approve"}'
+TOKEN=dev-only-operador-plantao   # plantonista@example.com no .env.example
+curl -s localhost:8080/approvals -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8080/approvals/<id> -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"decision":"reject","reason":"fora da janela de mudança"}'
+curl -s -X POST localhost:8080/incidents/<id>/cancel -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"reason":"alerta falso positivo"}'
 ```
 
-**Incidentes e auditoria** (mesma credencial de quem aprova):
-
-```bash
-curl -s localhost:8080/incidents -H "Authorization: Bearer $APPROVAL_TOKEN"      # etapas, diagnóstico, decisão
-curl -s localhost:8080/audit/verify -H "Authorization: Bearer $APPROVAL_TOKEN"   # verifica a cadeia de hashes
-```
+**Leituras** (mesma credencial): `/incidents`, `/incidents/:id`, `/audit`, `/audit/verify`, `/policy`, `/playbooks`, `/budget`, `/me`; `/config` é público.
 
 Para desenvolver no host: `make dev` (usa o `.env`). Sem `REDIS_URL`, o estado fica em memória.
 
@@ -120,6 +118,8 @@ pnpm eval --model real # evals com o LLM do .env (manual; custa tokens)
 | [0009](docs/adr/0009-sem-playbook-sem-llm.md) | Alerta sem playbook não é investigado pelo LLM |
 | [0010](docs/adr/0010-auditoria-em-s3-com-object-lock.md) | Trilha de auditoria em S3 com object lock (MinIO local) |
 | [0011](docs/adr/0011-estado-operacional-no-redis.md) | Orçamento, aprovações e incidentes no Redis, com falha fechada |
+| [0012](docs/adr/0012-autenticacao-de-operador.md) | Autenticação de operador: token de dev ou OIDC opcional |
+| [0013](docs/adr/0013-decisao-humana-aprovar-recusar-cancelar.md) | Aprovar, recusar com motivo e cancelar, com a identidade de quem decidiu |
 
 Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs/roteiros/limites-de-autonomia.md) e [roteiro dos playbooks](docs/roteiros/playbooks.md). O desenho completo está no [design doc](docs/design-doc.md).
 

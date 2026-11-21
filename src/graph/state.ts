@@ -24,6 +24,12 @@ export type Outcome = z.infer<typeof OutcomeSchema>;
 
 const value = <T>(initial: () => T) => Annotation<T>({ reducer: (_current, next) => next, default: initial });
 
+export interface StepRecord {
+  readonly step: string;
+  readonly startedAt: string;
+  readonly durationMs: number;
+}
+
 export const InvestigationState = Annotation.Root({
   incidentId: Annotation<string>,
   alert: Annotation<Alert>,
@@ -33,11 +39,14 @@ export const InvestigationState = Annotation.Root({
   decision: value<Decision | null>(() => null),
   execution: value<ExecutionResult | null>(() => null),
   approvalId: value<string | null>(() => null),
+  approvalExpiresAt: value<string | null>(() => null),
   failure: value<string | null>(() => null),
   outcome: value<Outcome | null>(() => null),
   llmUsage: value<LlmUsage>(() => EMPTY_USAGE),
   /** Etapas percorridas, na ordem. */
   steps: Annotation<string[]>({ reducer: (current, next) => [...current, ...next], default: () => [] }),
+  /** Hora e duração de cada etapa, para a fita do painel. */
+  timeline: Annotation<StepRecord[]>({ reducer: (current, next) => [...current, ...next], default: () => [] }),
 });
 
 export type InvestigationStateType = typeof InvestigationState.State;

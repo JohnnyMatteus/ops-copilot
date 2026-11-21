@@ -7,7 +7,7 @@ import { Investigator } from '../../src/incident/investigator.js';
 import { FakeLlmClient } from '../../src/llm/fake.js';
 import { FixtureMetricsSource, FixtureTraceSource } from '../../src/signals/fixture.js';
 import { InstrumentedLlmClient } from '../../src/telemetry/instrumented-llm.js';
-import { testDeps } from '../helpers/fixtures.js';
+import { PLANTONISTA, testDeps } from '../helpers/fixtures.js';
 import { alertFor, playbookById, realPolicy } from '../helpers/repo.js';
 import {
   diagnosis,
@@ -91,7 +91,7 @@ describe('grafo de investigação', () => {
         proposedAction: { actionId: 'replay_dlq_batch', params: { maxMessages: 100 }, rationale: 'causa já passou' },
       }),
     ]);
-    const { deps, audit, approvals, gate } = await testDeps({
+    const { deps, audit, approvals, gate, incidents } = await testDeps({
       llm,
       metricsSource: new FixtureMetricsSource(paymentsRecoveredMetrics),
       traceSource: new FixtureTraceSource(paymentsRecoveredTraces),
@@ -101,8 +101,8 @@ describe('grafo de investigação', () => {
     expect(report?.execution).toBeNull();
     expect(await approvals.list()).toHaveLength(1);
 
-    const service = new ApprovalService({ approvals, gate, executor: deps.executor, audit, metrics: deps.metrics });
-    const outcome = await service.resolve(report?.approvalId ?? '', 'plantonista@example.com', true);
+    const service = new ApprovalService({ approvals, incidents, gate, executor: deps.executor, audit, metrics: deps.metrics });
+    const outcome = await service.resolve(report?.approvalId ?? '', PLANTONISTA, { approve: true });
     expect(outcome).toMatchObject({ status: 'executed', execution: { status: 'dry_run', actionId: 'replay_dlq_batch' } });
     expect(await deps.metrics.registry.getSingleMetricAsString('ops_copilot_approvals_total')).toContain(
       'ops_copilot_approvals_total{service="payments-events-go",outcome="executed"} 1',
@@ -114,11 +114,11 @@ describe('grafo de investigação', () => {
       ['action_executed', 'human:plantonista@example.com'],
     ]);
     // A aprovação é de uso único.
-    expect(await service.resolve(report?.approvalId ?? '', 'plantonista@example.com', true)).toEqual({ status: 'not_found' });
+    expect(await service.resolve(report?.approvalId ?? '', PLANTONISTA, { approve: true })).toEqual({ status: 'not_found' });
   });
 
   it('aprovação expirada não executa', async () => {
-    const { deps, audit, gate } = await testDeps({
+    const { deps, audit, gate, incidents } = await testDeps({
       llm: new FakeLlmClient([]),
       metricsSource: new FixtureMetricsSource({}),
       traceSource: new FixtureTraceSource({}),
@@ -133,8 +133,8 @@ describe('grafo de investigação', () => {
       proposal: { actionId: 'notify_oncall', params: {} },
     });
     now = 5_000;
-    const service = new ApprovalService({ approvals, gate, executor: deps.executor, audit, metrics: deps.metrics });
-    expect(await service.resolve(pending.id, 'plantonista@example.com', true)).toEqual({ status: 'expired' });
+    const service = new ApprovalService({ approvals, incidents, gate, executor: deps.executor, audit, metrics: deps.metrics });
+    expect(await service.resolve(pending.id, PLANTONISTA, { approve: true })).toEqual({ status: 'expired' });
     expect(await audit.records()).toHaveLength(0);
   });
 

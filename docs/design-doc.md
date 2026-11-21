@@ -183,7 +183,7 @@ sequenceDiagram
   GT-->>G: needs_approval (irreversível; política exige aprovação)
   G->>Q: request (expira em 30 min)
   G->>A: approval_requested
-  P->>S: POST /approvals/:id {approver, approve}
+  P->>S: POST /approvals/:id {decision, reason} (operador pela credencial)
   S->>Q: take (uso único)
   S->>GT: authorizeApproved (reavalia com a política vigente)
   alt ainda permitido

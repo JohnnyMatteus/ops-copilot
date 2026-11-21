@@ -19,11 +19,14 @@ type Node = (state: InvestigationStateType) => Promise<InvestigationUpdate>;
 function instrument(deps: InvestigationDeps, name: NodeName, node: Node): Node {
   return (state) => {
     const stopTimer = deps.metrics.nodeDuration.startTimer({ node: name });
+    const startedAt = deps.now();
+    const clockStart = performance.now();
     return withSpan(deps.tracer, `ops_copilot.node.${name}`, { 'ops_copilot.incident_id': state.incidentId }, async (set) => {
       try {
         const update = await node(state);
         if (update.outcome) set({ 'ops_copilot.outcome': update.outcome });
-        return { ...update, steps: [name] };
+        const record = { step: name, startedAt: startedAt.toISOString(), durationMs: Math.round(performance.now() - clockStart) };
+        return { ...update, steps: [name], timeline: [record] };
       } finally {
         stopTimer();
       }

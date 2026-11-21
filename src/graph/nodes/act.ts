@@ -28,7 +28,10 @@ export function createActNode(deps: InvestigationDeps) {
           actor: 'copilot',
           details: { approvalId: approval.id, action: decision.action?.id, expiresAt: new Date(approval.expiresAt).toISOString() },
         });
-        return { outcome: 'awaiting_approval', approvalId: approval.id };
+        return { outcome: 'awaiting_approval',
+          approvalId: approval.id,
+          approvalExpiresAt: new Date(approval.expiresAt).toISOString(),
+        };
       }
       case 'auto_execute': {
         if (!decision.action) throw new Error('act: veredito automático sem ação.');
