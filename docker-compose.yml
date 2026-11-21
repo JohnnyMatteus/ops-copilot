@@ -1,0 +1,213 @@
+# Ambiente local do ops-copilot.
+#   core           copiloto + MinIO (trilha de auditoria imutável, ADR 0010)
+#   observability  Prometheus com métricas sintéticas, Alertmanager, Jaeger e gerador de traces
+#   tools          cliente mc para inspecionar a trilha de auditoria
+# `make up` sobe core + observability (modo autônomo). `make up-portfolio` sobe só o core na rede
+# portfolio-net, observando o Prometheus e o Jaeger dos outros projetos.
+# Variáveis e portas do host: veja .env.example.
+name: ops-copilot
+
+x-limits-small: &limits-small
+  deploy:
+    resources:
+      limits: { cpus: '0.5', memory: 192M }
+
+services:
+  ops-copilot:
+    profiles: [core]
+    build: .
+    image: ops-copilot:dev
+    env_file:
+      - path: .env
+        required: false
+    # .env entra como env_file (LLM, tokens); os endereços internos abaixo têm precedência, para
+    # que valores pensados para o host (localhost:9090) não vazem para dentro do contêiner.
+    environment:
+      PORT: '8080'
+      PROMETHEUS_URL: http://prometheus:9090
+      JAEGER_URL: http://jaeger:16686
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      LLM_BASE_URL: ${COPILOT_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-dev-only-webhook-token-change-me}
+      APPROVAL_TOKEN: ${APPROVAL_TOKEN:-dev-only-approval-token-change-me}
+      EXECUTION_MODE: dry-run
+      AUDIT_SINK: s3
+      AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
+      S3_ENDPOINT: http://minio:9000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${AUDIT_WRITER_ACCESS_KEY:-audit-writer}
+      AWS_SECRET_ACCESS_KEY: ${AUDIT_WRITER_SECRET_KEY:-dev-only-audit-writer-change-me}
+    ports:
+      - '127.0.0.1:${COPILOT_PORT:-8080}:8080'
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+      # Opcionais: no modo portfolio o copiloto observa o Prometheus e o Jaeger de outros projetos.
+      prometheus:
+        condition: service_healthy
+        required: false
+      jaeger:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8080/healthz']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      # A carga dos módulos (SDK da AWS, OpenTelemetry, LangGraph) pode levar dezenas de segundos em Docker com pouca CPU.
+      start_period: 90s
+    networks: [ops-copilot-net]
+    deploy:
+      resources:
+        limits: { cpus: '1.0', memory: 256M }
+
+  minio:
+    profiles: [core]
+    image: minio/minio:RELEASE.2025-04-03T14-56-28Z
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ops-copilot-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev-only-change-me}
+    volumes:
+      - minio-data:/data
+    ports:
+      - '127.0.0.1:${MINIO_API_PORT:-9000}:9000'
+      - '127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001'
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [ops-copilot-net]
+    deploy:
+      resources:
+        # Abaixo de ~1 GiB o MinIO fica lento e o healthcheck oscila.
+        limits: { cpus: '1.0', memory: 1G }
+
+  minio-init:
+    profiles: [core]
+    image: minio/mc:RELEASE.2025-04-03T17-07-56Z
+    entrypoint: ['/bin/sh', '/init/init.sh']
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ops-copilot-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev-only-change-me}
+      AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-30}
+      AUDIT_WRITER_ACCESS_KEY: ${AUDIT_WRITER_ACCESS_KEY:-audit-writer}
+      AUDIT_WRITER_SECRET_KEY: ${AUDIT_WRITER_SECRET_KEY:-dev-only-audit-writer-change-me}
+    volumes:
+      - ./deploy/minio:/init:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [ops-copilot-net]
+    <<: *limits-small
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:${PROMETHEUS_PORT:-9090}:9090'
+    depends_on:
+      alertmanager:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:9090/-/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [ops-copilot-net]
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 512M }
+
+  alertmanager:
+    profiles: [observability]
+    image: prom/alertmanager:v0.28.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - '127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:9093/-/healthy']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [ops-copilot-net]
+    <<: *limits-small
+
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/jaeger:2.9.0
+    ports:
+      - '127.0.0.1:${JAEGER_UI_PORT:-16686}:16686' # UI e API de consulta
+      - '127.0.0.1:${JAEGER_OTLP_PORT:-4318}:4318' # OTLP/HTTP
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:13133/status']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [ops-copilot-net]
+    deploy:
+      resources:
+        limits: { cpus: '0.5', memory: 512M }
+
+  synthetic-traces:
+    profiles: [observability]
+    image: node:22.21.1-alpine3.22
+    user: node
+    command: ['node', '/app/traces.mjs']
+    environment:
+      OTLP_ENDPOINT: http://jaeger:4318
+      INTERVAL_MS: '2000'
+    volumes:
+      - ./deploy/synthetic:/app:ro
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      # O gerador grava /tmp/heartbeat a cada envio bem-sucedido.
+      test: ['CMD-SHELL', 'find /tmp/heartbeat -mmin -1 | grep -q .']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks: [ops-copilot-net]
+    <<: *limits-small
+
+  mc:
+    profiles: [tools]
+    image: minio/mc:RELEASE.2025-04-03T17-07-56Z
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null && mc ls --versions --recursive local/$${AUDIT_S3_BUCKET}
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ops-copilot-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev-only-change-me}
+      AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [ops-copilot-net]
+
+networks:
+  ops-copilot-net:
+    name: ops-copilot-net
+
+volumes:
+  minio-data:
+  prometheus-data:
+  alertmanager-data:

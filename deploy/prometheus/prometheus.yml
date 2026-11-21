@@ -1,0 +1,20 @@
+# Prometheus de exemplo do ops-copilot. As métricas dos serviços são sintéticas (regras de
+# gravação em synthetic-rules.yml); o próprio copiloto é raspado na rede do compose.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/synthetic-rules.yml
+  - /etc/prometheus/alert-rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: ops-copilot
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['ops-copilot:8080']

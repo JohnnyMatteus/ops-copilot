@@ -1,0 +1,22 @@
+# Alertas que acionam os playbooks. alertname + service precisam casar com `match` do playbook.
+groups:
+  - name: ops-copilot-playbooks
+    rules:
+      - alert: PaymentsDlqBacklogHigh
+        expr: sum by (service) (payments_dlq_messages) > 500
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: DLQ de pagamentos com {{ $value | printf "%.0f" }} mensagens.
+      - alert: TelemetryConsumerLagHigh
+        expr: sum by (service, consumergroup) (kafka_consumergroup_lag) > 10000
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: Lag do consumer group {{ $labels.consumergroup }} em {{ $value | printf "%.0f" }} mensagens.
+      - alert: SaasP99LatencyHigh
+        expr: max by (service) (saas:http_request_duration_seconds:p99) > 1
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: Latência p99 da API em {{ $value | printf "%.2f" }}s.

@@ -1,0 +1,15 @@
+# Sobreposição para o modo ecossistema: o copiloto entra na rede compartilhada portfolio-net
+# (criada por `make network`) e observa o Prometheus e o Jaeger dos outros projetos.
+# Uso: make up-portfolio
+services:
+  ops-copilot:
+    networks: [ops-copilot-net, portfolio-net]
+    environment:
+      PROMETHEUS_URL: ${PORTFOLIO_PROMETHEUS_URL:-http://platform-edge-prometheus-1:9090}
+      JAEGER_URL: ${PORTFOLIO_JAEGER_URL:-http://platform-edge-jaeger-1:16686}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${PORTFOLIO_OTLP_ENDPOINT:-http://platform-edge-jaeger-1:4318}
+
+networks:
+  portfolio-net:
+    name: portfolio-net
+    external: true
