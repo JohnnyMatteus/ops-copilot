@@ -1,0 +1,60 @@
+# Séries sintéticas que imitam o que payments-events-go, kafka-telemetry e saas-multitenant
+# exporiam. Cada serviço segue um ciclo senoidal próprio, então os alertas disparam e se
+# resolvem sozinhos a cada poucos minutos. Os nomes são os mesmos que os playbooks consultam.
+groups:
+  - name: synthetic-payments-events-go
+    rules:
+      - record: payments_dlq_messages
+        expr: clamp_min(1500 * sin(vector(time()) / 600), 0) + 30
+        labels: { service: payments-events-go, queue: payments.events.dlq }
+      - record: payments_consumer_error_ratio
+        expr: clamp_min(0.5 * sin(vector(time()) / 600 + 0.6), 0) + 0.01
+        labels: { service: payments-events-go }
+      - record: payments_downstream_up
+        expr: sin(vector(time()) / 600 + 0.6) < bool 0.3
+        labels: { service: payments-events-go, dependency: ledger-api }
+
+  - name: synthetic-kafka-telemetry
+    rules:
+      - record: kafka_consumergroup_lag
+        expr: clamp_min(6000 * sin(vector(time()) / 900), 0) + 50
+        labels: { service: kafka-telemetry, consumergroup: greenhouse-readings-enricher, topic: greenhouse.readings.v1, partition: '0' }
+      - record: kafka_consumergroup_lag
+        expr: clamp_min(5800 * sin(vector(time()) / 900), 0) + 40
+        labels: { service: kafka-telemetry, consumergroup: greenhouse-readings-enricher, topic: greenhouse.readings.v1, partition: '1' }
+      - record: kafka_consumergroup_lag
+        expr: clamp_min(6100 * sin(vector(time()) / 900), 0) + 60
+        labels: { service: kafka-telemetry, consumergroup: greenhouse-readings-enricher, topic: greenhouse.readings.v1, partition: '2' }
+      - record: kafka_telemetry_produced_per_second
+        expr: 1000 + 450 * clamp_min(sin(vector(time()) / 900), 0)
+        labels: { service: kafka-telemetry }
+      - record: kafka_telemetry_consumed_per_second
+        expr: vector(1000)
+        labels: { service: kafka-telemetry }
+      - record: kafka_telemetry_consumer_replicas
+        expr: vector(4)
+        labels: { service: kafka-telemetry }
+
+  - name: synthetic-saas-multitenant
+    rules:
+      - record: saas:http_request_duration_seconds:p99
+        expr: 0.5 + 2.2 * clamp_min(sin(vector(time()) / 450), 0)
+        labels: { service: saas-multitenant, route: /api/v1/reports/export }
+      - record: saas:http_request_duration_seconds:p99
+        expr: 0.3 + 0.6 * clamp_min(sin(vector(time()) / 450), 0)
+        labels: { service: saas-multitenant, route: /api/v1/bookings }
+      - record: saas_http_requests_per_second
+        expr: 15 + 190 * clamp_min(sin(vector(time()) / 450), 0)
+        labels: { service: saas-multitenant, tenant: estudio-lotus }
+      - record: saas_http_requests_per_second
+        expr: vector(14)
+        labels: { service: saas-multitenant, tenant: estudio-sol }
+      - record: saas_http_requests_per_second
+        expr: vector(11)
+        labels: { service: saas-multitenant, tenant: estudio-bambu }
+      - record: saas_db_pool_in_use_ratio
+        expr: 0.5 + 0.2 * clamp_min(sin(vector(time()) / 450), 0)
+        labels: { service: saas-multitenant }
+      - record: saas_api_cpu_utilization_ratio
+        expr: 0.45 + 0.1 * clamp_min(sin(vector(time()) / 450), 0)
+        labels: { service: saas-multitenant }

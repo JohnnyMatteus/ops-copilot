@@ -1,0 +1,37 @@
+name: Bug
+description: Comportamento errado do copiloto
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: O que aconteceu
+      description: Inclua o incidentId e o outcome, se houver.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: O que era esperado
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options: [Gate de autonomia, Playbook, Diagnóstico (LLM), Coleta de sinais, Auditoria, HTTP/aprovações, Infraestrutura local]
+    validations:
+      required: true
+  - type: dropdown
+    id: safety
+    attributes:
+      label: Uma ação fora do limite foi executada ou aprovada?
+      options: ['Não', 'Sim (prioridade máxima)']
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidências
+      description: Registros da trilha de auditoria, logs ou trace_id. Sem segredos.
+      render: shell

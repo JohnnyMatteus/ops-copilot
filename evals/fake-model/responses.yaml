@@ -1,0 +1,24 @@
+# Respostas roteirizadas do modelo falso usado no CI. Simulam imperfeições reais de propósito:
+# - telemetry-slow-sink: o modelo erra a hipótese (prova que o harness detecta erros);
+# - telemetry-stuck-consumer: a primeira resposta é inválida e o retry corrige.
+saas-noisy-tenant:
+  - '{"hypothesisId":"noisy_tenant","confidence":0.9,"summary":"estudio-lotus concentra o tráfego na exportação de relatórios.","evidence":[{"signal":"requests_by_tenant","observation":"estudio-lotus com 210 req/s contra 14 do segundo"}],"proposedAction":{"actionId":"toggle_feature_flag","params":{},"rationale":"proteger os demais tenants"}}'
+saas-slow-query:
+  - '{"hypothesisId":"slow_query","confidence":0.85,"summary":"Pool do MySQL saturado com CPU baixa e consulta lenta nos traces.","evidence":[{"signal":"db_pool_in_use","observation":"pool em 100%"},{"signal":"slow_requests","observation":"mysql.query bookings_by_week leva 2,1s"}],"proposedAction":{"actionId":"notify_oncall","params":{},"rationale":"exige correção de índice por humanos"}}'
+saas-cpu-saturation:
+  - '{"hypothesisId":"cpu_saturation","confidence":0.88,"summary":"CPU acima de 90% com tráfego bem distribuído entre tenants.","evidence":[{"signal":"cpu_utilization","observation":"CPU em 95%"}],"proposedAction":{"actionId":"scale_deployment","params":{"replicasDelta":2},"rationale":"mais capacidade"}}'
+payments-downstream-recovered:
+  - '{"hypothesisId":"downstream_recovered","confidence":0.92,"summary":"ledger-api voltou e a DLQ guarda eventos da janela de falha.","evidence":[{"signal":"downstream_up","observation":"ledger-api de 0 para 1"},{"signal":"consumer_error_ratio","observation":"erros caíram para 1%"}],"proposedAction":{"actionId":"replay_dlq_batch","params":{"maxMessages":100},"rationale":"causa já passou"}}'
+payments-downstream-down:
+  - '{"hypothesisId":"downstream_outage_ongoing","confidence":0.95,"summary":"ledger-api segue fora e os eventos falham por timeout.","evidence":[{"signal":"downstream_up","observation":"ledger-api em 0"}],"proposedAction":{"actionId":"notify_oncall","params":{},"rationale":"não reprocessar enquanto a dependência estiver fora"}}'
+payments-poison-message:
+  - '{"hypothesisId":"poison_message","confidence":0.8,"summary":"Falha constante na desserialização de refund.v2 com dependências saudáveis.","evidence":[{"signal":"failing_event_processing","observation":"erro em event.decode refund.v2"}],"proposedAction":{"actionId":"notify_oncall","params":{},"rationale":"exige correção do consumidor"}}'
+telemetry-underprovisioned:
+  - '{"hypothesisId":"consumer_underprovisioned","confidence":0.9,"summary":"Produção 45% acima do consumo e lag em todas as partições.","evidence":[{"signal":"ingress_vs_consumed","observation":"razão 1,45"}],"proposedAction":{"actionId":"scale_deployment","params":{"replicasDelta":2},"rationale":"mais consumidores"}}'
+telemetry-poison-record:
+  - '{"hypothesisId":"poison_record","confidence":0.86,"summary":"Partição 3 concentra o lag com erros em schema.decode.","evidence":[{"signal":"partition_lag","observation":"partição 3 com 9700"}],"proposedAction":{"actionId":"reset_consumer_offsets","params":{"consumerGroup":"greenhouse-readings-enricher","topic":"greenhouse.readings.v1"},"rationale":"pular o registro"}}'
+telemetry-slow-sink:
+  - '{"hypothesisId":"consumer_underprovisioned","confidence":0.7,"summary":"Produção acima do consumo.","evidence":[{"signal":"ingress_vs_consumed","observation":"razão 1,35"}],"proposedAction":{"actionId":"notify_oncall","params":{},"rationale":"avisar o plantão"}}'
+telemetry-stuck-consumer:
+  - 'Os consumidores parecem travados; recomendo reiniciar.'
+  - '{"hypothesisId":"stuck_consumer","confidence":0.75,"summary":"Consumo quase parado sem erros após rebalance.","evidence":[{"signal":"ingress_vs_consumed","observation":"razão 40"}],"proposedAction":{"actionId":"restart_pods","params":{},"rationale":"forçar rebalance limpo"}}'

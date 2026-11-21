@@ -1,0 +1,29 @@
+name: Funcionalidade
+description: Novo playbook, ação, fonte de sinal ou melhoria
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema operacional
+      description: Que incidente ou trabalho manual isso resolve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+    validations:
+      required: true
+  - type: dropdown
+    id: autonomy
+    attributes:
+      label: Impacto nos limites de autonomia
+      options: [Nenhum, Nova ação no catálogo, Mudança de nível ou allowlist, Mudança no gate]
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Reversibilidade e riscos
+      description: A ação é reversível? O que acontece se o diagnóstico estiver errado?

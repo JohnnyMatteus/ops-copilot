@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancela execuções antigas só em PR; na main cada commit mantém seu resultado.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  node:
+    name: lint, typecheck, testes, evals e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # Sem "version": a action lê o campo packageManager do package.json.
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Instalar Node (versão do .nvmrc)
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Validar playbooks e política de autonomia
+        run: pnpm validate:playbooks
+
+      - name: Testes
+        run: pnpm test
+
+      # Modelo falso roteirizado: nenhum LLM real é chamado no CI.
+      - name: Evals (modelo falso)
+        run: pnpm eval
+
+      - name: Build
+        run: pnpm build
+
+  docker:
+    name: compose e imagem
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validar docker-compose
+        run: |
+          docker compose --profile core --profile observability --profile tools config -q
+          docker compose -f docker-compose.yml -f docker-compose.portfolio.yml --profile core config -q
+
+      - name: Validar configuração do Prometheus
+        run: docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+
+      - name: Validar configuração do Alertmanager
+        run: docker run --rm -v "$PWD/deploy/alertmanager:/etc/alertmanager:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml
+
+      - name: Build da imagem
+        run: docker build -t ops-copilot:ci .

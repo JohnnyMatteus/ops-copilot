@@ -1,0 +1,74 @@
+apiVersion: ops-copilot/v1
+kind: Playbook
+metadata:
+  id: telemetry-consumer-lag
+  version: 1.0.0
+  owner: time-telemetria
+  description: Lag crescente do consumidor que enriquece leituras dos sensores das estufas.
+match:
+  alertname: TelemetryConsumerLagHigh
+  service: kafka-telemetry
+signals:
+  metrics:
+    - name: consumer_lag
+      description: Lag total do consumer group por tópico.
+      query: 'sum by (topic) (kafka_consumergroup_lag{service="{{service}}",consumergroup="{{consumergroup}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+    - name: ingress_vs_consumed
+      description: Razão entre mensagens produzidas e consumidas (maior que 1 = consumidor atrás).
+      query: 'sum(kafka_telemetry_produced_per_second{service="{{service}}"}) / sum(kafka_telemetry_consumed_per_second{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+    - name: consumer_replicas
+      description: Réplicas ativas do consumidor.
+      query: 'max(kafka_telemetry_consumer_replicas{service="{{service}}"})'
+      kind: instant
+    - name: partition_lag
+      description: Lag por partição (uma partição isolada sugere registro envenenado).
+      query: 'topk(5, kafka_consumergroup_lag{service="{{service}}",consumergroup="{{consumergroup}}"})'
+      kind: instant
+  traces:
+    - name: slow_enrichment
+      description: Traces lentos do enriquecimento e da escrita na base de séries temporais.
+      service: kafka-telemetry
+      operation: enrich_reading
+      minDurationMs: 100
+      lookback: 30m
+      limit: 20
+diagnosis:
+  guidance: |
+    Lag distribuído por todas as partições com produção acima do consumo indica falta de réplicas.
+    Lag concentrado numa partição, com as demais em dia, indica registro envenenado.
+    Se os traces mostram a escrita na base de séries temporais lenta, mais réplicas pioram a pressão.
+  hypotheses:
+    - id: consumer_underprovisioned
+      description: Produção acima da capacidade de consumo, lag distribuído e sem erros.
+    - id: slow_sink
+      description: A escrita na base de séries temporais está lenta; o consumidor espera o destino.
+    - id: poison_record
+      description: Um registro específico trava uma partição; as demais seguem em dia.
+    - id: stuck_consumer
+      description: Consumidores sem progresso e sem erro aparente (ex. rebalance travado).
+actions:
+  - action: notify_oncall
+    when: [consumer_underprovisioned, slow_sink, poison_record, stuck_consumer]
+    params: { channel: '#plantao-telemetria' }
+    rationale: Avisar o plantão com o diagnóstico.
+  - action: scale_deployment
+    when: [consumer_underprovisioned]
+    params: { deployment: readings-enricher, maxReplicas: 12 }
+    rationale: Réplicas até o número de partições quando falta capacidade.
+  - action: restart_pods
+    when: [stuck_consumer]
+    params: { deployment: readings-enricher }
+    rationale: Reiniciar consumidores travados força um rebalance limpo.
+  - action: reset_consumer_offsets
+    when: [poison_record]
+    params: { to: latest }
+    rationale: Pular o registro envenenado. Perde dados; só como sugestão para humanos.
+autonomy:
+  maxLevel: auto_execute
+  minConfidenceForAuto: 0.8

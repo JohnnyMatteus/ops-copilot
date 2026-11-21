@@ -1,0 +1,69 @@
+apiVersion: ops-copilot/v1
+kind: Playbook
+metadata:
+  id: saas-p99-latency
+  version: 1.0.0
+  owner: time-agendamento
+  description: Latência p99 alta na API do SaaS de agendamento dos estúdios.
+match:
+  alertname: SaasP99LatencyHigh
+  service: saas-multitenant
+signals:
+  metrics:
+    - name: p99_by_route
+      description: Latência p99 por rota, em segundos.
+      query: 'max by (route) (saas:http_request_duration_seconds:p99{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+    - name: requests_by_tenant
+      description: Requisições por segundo por tenant (um tenant dominante indica vizinho barulhento).
+      query: 'topk(5, sum by (tenant) (saas_http_requests_per_second{service="{{service}}"}))'
+      kind: instant
+    - name: db_pool_in_use
+      description: Fração do pool de conexões do MySQL em uso.
+      query: 'max(saas_db_pool_in_use_ratio{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+    - name: cpu_utilization
+      description: Uso médio de CPU dos pods da API.
+      query: 'avg(saas_api_cpu_utilization_ratio{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+  traces:
+    - name: slow_requests
+      description: Requisições acima de 1 segundo e a operação mais lenta de cada uma.
+      service: saas-multitenant
+      minDurationMs: 1000
+      lookback: 30m
+      limit: 30
+diagnosis:
+  guidance: |
+    Compare a distribuição por tenant antes de escalar: se um tenant concentra o tráfego numa
+    rota pesada (ex. exportação de relatórios), desligar a funcionalidade degradável protege os
+    demais. Pool do banco saturado com CPU baixa indica consulta lenta: mais réplicas pioram.
+  hypotheses:
+    - id: noisy_tenant
+      description: Um tenant concentra a carga numa rota pesada e degrada os demais.
+    - id: slow_query
+      description: Consulta lenta no MySQL segura conexões; pool saturado com CPU baixa.
+    - id: cpu_saturation
+      description: Pods da API com CPU alta e tráfego distribuído entre tenants.
+actions:
+  - action: notify_oncall
+    when: [noisy_tenant, slow_query, cpu_saturation]
+    params: { channel: '#plantao-agendamento' }
+    rationale: Avisar o plantão com o diagnóstico.
+  - action: toggle_feature_flag
+    when: [noisy_tenant]
+    params: { flag: reports.heavy_export, enabled: false }
+    rationale: Desligar a exportação pesada de relatórios; a flag volta ao normal sem perda de dados.
+  - action: scale_deployment
+    when: [cpu_saturation]
+    params: { deployment: saas-api, maxReplicas: 10 }
+    rationale: Mais réplicas quando a CPU satura com carga distribuída.
+autonomy:
+  maxLevel: auto_execute
+  minConfidenceForAuto: 0.8
