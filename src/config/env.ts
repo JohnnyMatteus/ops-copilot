@@ -5,7 +5,9 @@ import { ExecutionModeSchema } from '../executor/executor.js';
 const token = z.string().min(16, 'use pelo menos 16 caracteres');
 
 const LlmEnvShape = {
-  LLM_PROVIDER: z.enum(['openrouter', 'ollama']).default('ollama'),
+  /** `scripted` responde de LLM_SCRIPT_FILE, sem rede: só para demonstração. */
+  LLM_PROVIDER: z.enum(['openrouter', 'ollama', 'scripted']).default('ollama'),
+  LLM_SCRIPT_FILE: z.string().min(1).default('config/scripted-llm.yaml'),
   LLM_BASE_URL: z.url().default('http://localhost:11434/v1'),
   LLM_MODEL: z.string().min(1).default('qwen2.5:7b-instruct'),
   OPENROUTER_API_KEY: z.string().min(1).optional(),

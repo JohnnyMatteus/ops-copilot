@@ -9,7 +9,7 @@ import { createHttpServer } from './http/server.js';
 import { ApprovalService } from './incident/approval-service.js';
 import { ApprovalStore } from './incident/approvals.js';
 import { Investigator } from './incident/investigator.js';
-import { OpenAiCompatibleClient } from './llm/openai-compatible.js';
+import { createLlmClient } from './llm/factory.js';
 import { loadPlaybooks } from './playbooks/registry.js';
 import { JaegerTraceSource } from './signals/jaeger.js';
 import { S3ObjectStore } from './storage/s3-object-store.js';
@@ -32,11 +32,7 @@ export async function createApp(env: Env, logger: Logger) {
   const gate = new AutonomyGate(policy, new SlidingWindowBudget());
   const executor = createExecutor(env.EXECUTION_MODE);
   const approvals = new ApprovalStore({ ttlMs: env.APPROVAL_TTL_MINUTES * 60_000 });
-  const llm = new InstrumentedLlmClient(
-    new OpenAiCompatibleClient({ provider: env.LLM_PROVIDER, baseUrl: env.LLM_BASE_URL, apiKey: env.OPENROUTER_API_KEY }),
-    tracing.tracer,
-    metrics,
-  );
+  const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
 
   const investigator = new Investigator({
     playbooks,

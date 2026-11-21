@@ -1,0 +1,19 @@
+# Respostas do modelo roteirizado (LLM_PROVIDER=scripted), uma por playbook. Usado na gravação da
+# evidência, onde não há LLM real; coerentes com as métricas de deploy/prometheus/incident-rules.yml.
+saas-p99-latency: >-
+  {"hypothesisId":"noisy_tenant","confidence":0.9,
+  "summary":"estudio-lotus concentra o tráfego na exportação de relatórios e puxa o p99 da API.",
+  "evidence":[{"signal":"requests_by_tenant","observation":"estudio-lotus com ~205 req/s contra 14 do segundo tenant"},
+  {"signal":"p99_by_route","observation":"/api/v1/reports/export com p99 de 2,7s"}],
+  "proposedAction":{"actionId":"toggle_feature_flag","params":{},"rationale":"desligar a exportação pesada protege os demais tenants"}}
+payments-dlq-backlog: >-
+  {"hypothesisId":"downstream_recovered","confidence":0.92,
+  "summary":"ledger-api voltou e a DLQ guarda os eventos da janela de falha.",
+  "evidence":[{"signal":"downstream_up","observation":"ledger-api disponível (1)"},
+  {"signal":"consumer_error_ratio","observation":"erros em 1%"}],
+  "proposedAction":{"actionId":"replay_dlq_batch","params":{"maxMessages":100},"rationale":"a causa já passou"}}
+telemetry-consumer-lag: >-
+  {"hypothesisId":"poison_record","confidence":0.88,
+  "summary":"A partição 0 concentra o lag; as demais estão em dia.",
+  "evidence":[{"signal":"partition_lag","observation":"partição 0 com ~11000 mensagens, demais abaixo de 100"}],
+  "proposedAction":{"actionId":"reset_consumer_offsets","params":{"consumerGroup":"greenhouse-readings-enricher","topic":"greenhouse.readings.v1"},"rationale":"pular o registro envenenado"}}
