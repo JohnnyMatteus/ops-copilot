@@ -72,7 +72,10 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.portfolio.yml --profile core config -q
 
       - name: Validar configuração do Prometheus
-        run: docker run --rm -v "$PWD/deploy/prometheus:/cfg:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /cfg/prometheus.yml
+        run: docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+
+      - name: Validar configuração do Alertmanager
+        run: docker run --rm -v "$PWD/deploy/alertmanager:/etc/alertmanager:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml
 
       - name: Build da imagem
         run: docker build -t ops-copilot:ci .
