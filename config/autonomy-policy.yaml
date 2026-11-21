@@ -1,0 +1,24 @@
+# Política de autonomia do ops-copilot (ADR 0002). Mudanças aqui passam por PR e revisão:
+# é este arquivo, e não o prompt, que define o que o copiloto pode fazer sozinho.
+apiVersion: ops-copilot/v1
+kind: AutonomyPolicy
+# true = nenhuma execução, em nenhum serviço; tudo vira sugestão.
+killSwitch: false
+defaults:
+  # Serviço não listado: somente leitura e allowlist vazia.
+  level: read_only
+  budget: { window: 1h, maxAutoActions: 0 }
+services:
+  payments-events-go:
+    # Dinheiro envolvido: nada roda sem uma pessoa aprovar.
+    level: execute_with_approval
+    allowedActions: [notify_oncall, replay_dlq_batch, scale_deployment]
+    budget: { window: 1h, maxAutoActions: 0 }
+  kafka-telemetry:
+    level: auto_execute
+    allowedActions: [notify_oncall, scale_deployment, restart_pods, reset_consumer_offsets]
+    budget: { window: 30m, maxAutoActions: 3 }
+  saas-multitenant:
+    level: auto_execute
+    allowedActions: [notify_oncall, toggle_feature_flag, scale_deployment]
+    budget: { window: 1h, maxAutoActions: 4 }

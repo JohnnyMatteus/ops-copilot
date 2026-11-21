@@ -1,0 +1,68 @@
+apiVersion: ops-copilot/v1
+kind: Playbook
+metadata:
+  id: payments-dlq-backlog
+  version: 1.0.0
+  owner: time-pagamentos
+  description: Mensagens acumulando na DLQ do processador de eventos de pagamento.
+match:
+  alertname: PaymentsDlqBacklogHigh
+  service: payments-events-go
+signals:
+  metrics:
+    - name: dlq_depth
+      description: Mensagens na DLQ nos últimos 30 minutos.
+      query: 'sum by (queue) (payments_dlq_messages{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+    - name: consumer_error_ratio
+      description: Fração de eventos que falham no consumidor.
+      query: 'max(payments_consumer_error_ratio{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+    - name: downstream_up
+      description: Disponibilidade das dependências (1 = disponível).
+      query: 'min by (dependency) (payments_downstream_up{service="{{service}}"})'
+      kind: range
+      window: 30m
+      step: 60s
+  traces:
+    - name: failing_event_processing
+      description: Traces lentos ou com erro do processamento de eventos.
+      service: payments-events-go
+      operation: process_payment_event
+      minDurationMs: 200
+      lookback: 30m
+      limit: 20
+diagnosis:
+  guidance: |
+    A DLQ só deve ser reprocessada quando a causa já passou. Se a dependência ainda está fora,
+    reprocessar devolve as mensagens para a DLQ. Se o erro é sempre do mesmo tipo de evento com a
+    dependência saudável, é mensagem envenenada e reprocessar não resolve.
+  hypotheses:
+    - id: downstream_outage_ongoing
+      description: Uma dependência (ex. ledger-api) continua indisponível e os eventos falham por isso.
+    - id: downstream_recovered
+      description: A dependência ficou fora, já voltou, e a DLQ guarda os eventos do período da falha.
+    - id: poison_message
+      description: Eventos de um formato específico falham sempre, com as dependências saudáveis.
+    - id: consumer_saturation
+      description: Consumidor sem erros, mas sem vazão; mensagens expiram por timeout e caem na DLQ.
+actions:
+  - action: notify_oncall
+    when: [downstream_outage_ongoing, poison_message, downstream_recovered, consumer_saturation]
+    params: { channel: '#plantao-pagamentos' }
+    rationale: Avisar o plantão com o diagnóstico, sempre seguro.
+  - action: replay_dlq_batch
+    when: [downstream_recovered]
+    params: { queue: payments.events.dlq }
+    rationale: Reprocessar um lote pequeno depois que a dependência voltou.
+  - action: scale_deployment
+    when: [consumer_saturation]
+    params: { deployment: payments-consumer, maxReplicas: 8 }
+    rationale: Mais réplicas do consumidor quando falta vazão sem erros.
+autonomy:
+  maxLevel: execute_with_approval
+  minConfidenceForAuto: 0.85
