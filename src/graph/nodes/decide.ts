@@ -8,7 +8,7 @@ export function createDecideNode(deps: InvestigationDeps) {
     if (!playbook || !diagnosis) throw new Error('decide: estado sem playbook ou diagnóstico.');
     if (!diagnosis.proposedAction) return { outcome: 'no_action' };
 
-    const decision = deps.gate.decide({
+    const decision = await deps.gate.decide({
       service: alert.service,
       playbook,
       hypothesisId: diagnosis.hypothesisId,

@@ -25,7 +25,7 @@ Os níveis são `read_only`, `suggest`, `execute_with_approval` e `auto_execute`
 - As garantias não dependem do modelo. Os testes de `tests/autonomy/gate.test.ts` provam que ações fora do limite são bloqueadas, inclusive quando o modelo "obedece" a uma injeção (`tests/graph/investigation.test.ts`).
 - Mudar o que o copiloto pode fazer sozinho é um PR em YAML, com revisão, e não um ajuste de prompt.
 - Há mais código para manter: o catálogo precisa crescer junto com as ações, e cada ação nova precisa de schema de parâmetros e de classificação de reversibilidade.
-- O orçamento fica em memória: reinicia com o processo e não é compartilhado entre réplicas. Isso está registrado como próximo passo.
+- O orçamento ficava em memória e reiniciava com o processo. Desde o ADR 0011 ele fica no Redis, com consumo atômico.
 
 ## Alternativas consideradas
 

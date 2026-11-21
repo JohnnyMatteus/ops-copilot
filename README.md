@@ -38,6 +38,8 @@ flowchart LR
 
   A -- auto_execute --> EX[Executor<br/>dry-run]
   A -- needs_approval --> AP[Fila de aprovação<br/>POST /approvals/:id]
+  DE <-. orçamento .-> RE[(Redis<br/>orçamento · aprovações · incidentes)]
+  AP <-.-> RE
   AP --> DE2{reavalia no gate} --> EX
   G -. cada etapa .-> AU[(Trilha de auditoria<br/>hash encadeado · S3 object lock)]
   G -. spans, tokens, custo .-> OTEL[OpenTelemetry + /metrics]
@@ -58,7 +60,7 @@ Pré-requisitos: Node 22, pnpm 12 e Docker.
 ```bash
 cp .env.example .env
 pnpm install
-make up          # copiloto + MinIO + Prometheus/Alertmanager/Jaeger com dados sintéticos
+make up          # copiloto + Redis + MinIO + Prometheus/Alertmanager/Jaeger com dados sintéticos
 make seed        # dispara um alerta de exemplo (SCENARIO=saas|payments|telemetry)
 make logs        # acompanha a investigação
 make audit       # lista a trilha de auditoria no MinIO
@@ -81,13 +83,20 @@ curl -s -X POST localhost:8080/approvals/<id> -H "Authorization: Bearer $APPROVA
   -H 'Content-Type: application/json' -d '{"approver":"plantonista@example.com","decision":"approve"}'
 ```
 
-Para desenvolver no host: `make dev` (usa o `.env`).
+**Incidentes e auditoria** (mesma credencial de quem aprova):
+
+```bash
+curl -s localhost:8080/incidents -H "Authorization: Bearer $APPROVAL_TOKEN"      # etapas, diagnóstico, decisão
+curl -s localhost:8080/audit/verify -H "Authorization: Bearer $APPROVAL_TOKEN"   # verifica a cadeia de hashes
+```
+
+Para desenvolver no host: `make dev` (usa o `.env`). Sem `REDIS_URL`, o estado fica em memória.
 
 ## Como testar
 
 ```bash
 make test              # lint + typecheck + testes unitários + evals com modelo falso
-make test-integration  # contra Prometheus, Jaeger e MinIO do compose (rode make up antes)
+make test-integration  # contra Prometheus, Jaeger, MinIO e Redis do compose (rode make up antes)
 pnpm eval --model real # evals com o LLM do .env (manual; custa tokens)
 ```
 
@@ -110,6 +119,7 @@ pnpm eval --model real # evals com o LLM do .env (manual; custa tokens)
 | [0008](docs/adr/0008-evals-com-modelo-falso-no-ci.md) | Evals com modelo falso no CI e real sob demanda |
 | [0009](docs/adr/0009-sem-playbook-sem-llm.md) | Alerta sem playbook não é investigado pelo LLM |
 | [0010](docs/adr/0010-auditoria-em-s3-com-object-lock.md) | Trilha de auditoria em S3 com object lock (MinIO local) |
+| [0011](docs/adr/0011-estado-operacional-no-redis.md) | Orçamento, aprovações e incidentes no Redis, com falha fechada |
 
 Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs/roteiros/limites-de-autonomia.md) e [roteiro dos playbooks](docs/roteiros/playbooks.md). O desenho completo está no [design doc](docs/design-doc.md).
 
@@ -123,14 +133,13 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 
 - **Previsibilidade em vez de flexibilidade:** etapas fixas e uma chamada ao LLM por incidente. O copiloto não "explora" livremente; incidentes sem playbook vão direto para humanos.
 - **Playbook obrigatório:** cobertura cresce na velocidade com que os times escrevem playbooks. Em troca, toda ação tem dono, versão e revisão.
-- **Orçamento e aprovações em memória:** simples e testável, mas reiniciam com o processo e não funcionam com várias réplicas.
+- **Estado operacional no Redis (ADR 0011):** orçamento, aprovações e incidentes sobrevivem a restart e valem para várias réplicas, ao custo de mais uma dependência. Sem Redis, o gate falha fechado.
 - **Dry-run apenas:** a fundação prova as decisões, não a execução. Ligar o modo live exige adaptadores reais.
 - **Resumo de sinais, não dados brutos:** o prompt tem tamanho limitado e custo previsível, mas o modelo vê estatísticas e não a série completa.
 
 ## Próximos passos
 
 - Adaptadores reais do executor (Kubernetes para `scale_deployment`/`restart_pods`, serviço de feature flags, fila da DLQ) e ações inversas automáticas para rollback.
-- Orçamento e fila de aprovações em Redis, para várias réplicas e reinícios.
 - Aprovação via ChatOps (Slack/Teams) e autenticação pelo Keycloak do `platform-edge`, no lugar do token compartilhado.
 - RAG sobre runbooks em Markdown para enriquecer a orientação dos playbooks.
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).

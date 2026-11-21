@@ -1,5 +1,5 @@
 # Ambiente local do ops-copilot.
-#   core           copiloto + MinIO (trilha de auditoria imutável, ADR 0010)
+#   core           copiloto + Redis (orçamento, aprovações e incidentes) + MinIO (auditoria, ADR 0010)
 #   observability  Prometheus com métricas sintéticas, Alertmanager, Jaeger e gerador de traces
 #   tools          cliente mc para inspecionar a trilha de auditoria
 # `make up` sobe core + observability (modo autônomo). `make up-portfolio` sobe só o core na rede
@@ -37,6 +37,7 @@ services:
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: ${AUDIT_WRITER_ACCESS_KEY:-audit-writer}
       AWS_SECRET_ACCESS_KEY: ${AUDIT_WRITER_SECRET_KEY:-dev-only-audit-writer-change-me}
+      REDIS_URL: redis://redis:6379
     ports:
       - '127.0.0.1:${COPILOT_PORT:-8080}:8080'
     extra_hosts:
@@ -44,6 +45,8 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
       # Opcionais: no modo portfolio o copiloto observa o Prometheus e o Jaeger de outros projetos.
       prometheus:
         condition: service_healthy
@@ -62,6 +65,23 @@ services:
     deploy:
       resources:
         limits: { cpus: '1.0', memory: 256M }
+
+  redis:
+    profiles: [core]
+    image: redis:7.4.6-alpine
+    # AOF: aprovações pendentes e o saldo do orçamento sobrevivem também a um restart do Redis.
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory', '96mb', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [ops-copilot-net]
+    <<: *limits-small
 
   minio:
     profiles: [core]
@@ -208,6 +228,7 @@ networks:
     name: ops-copilot-net
 
 volumes:
+  redis-data:
   minio-data:
   prometheus-data:
   alertmanager-data:

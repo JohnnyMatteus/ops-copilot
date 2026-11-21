@@ -28,6 +28,8 @@ async function start() {
   server = createHttpServer({
     investigate: async (alert) => investigated.push(alert),
     approvals: setup.approvals,
+    incidents: setup.incidents,
+    audit: setup.audit,
     approvalService: new ApprovalService({ ...setup, executor: setup.deps.executor }),
     registry: setup.metrics.registry,
     logger: silentLogger(),
@@ -85,7 +87,7 @@ describe('servidor HTTP', () => {
 
   it('lista e rejeita aprovações pendentes, com auditoria do humano', async () => {
     const { call, approvals, audit } = await start();
-    const pending = approvals.request('inc-1', {
+    const pending = await approvals.request('inc-1', {
       service: 'payments-events-go',
       playbook: await playbookById('payments-dlq-backlog'),
       hypothesisId: 'downstream_recovered',
@@ -109,6 +111,21 @@ describe('servidor HTTP', () => {
     const id = '00000000-0000-4000-8000-000000000000';
     expect((await call(`/approvals/${id}`, post(APPROVAL_TOKEN, { approver: 'a@example.com', decision: 'approve' }))).status).toBe(404);
     expect((await call(`/approvals/${id}`, post(APPROVAL_TOKEN, { approver: 'sem-email', decision: 'approve' }))).status).toBe(400);
+  });
+
+  it('expõe a verificação da cadeia de auditoria só com a credencial de operador', async () => {
+    const { call, audit } = await start();
+    await audit.append({ incidentId: 'inc-1', event: 'alert_received', actor: 'copilot', details: {} });
+    expect((await call('/audit/verify')).status).toBe(401);
+    const response = await call('/audit/verify', { headers: { Authorization: `Bearer ${APPROVAL_TOKEN}` } });
+    expect(await response.json()).toMatchObject({ valid: true, records: 1, head: { seq: 0, event: 'alert_received' } });
+  });
+
+  it('incidente desconhecido responde 404', async () => {
+    const { call } = await start();
+    const auth = { headers: { Authorization: `Bearer ${APPROVAL_TOKEN}` } };
+    expect(await (await call('/incidents', auth)).json()).toEqual([]);
+    expect((await call('/incidents/00000000-0000-4000-8000-000000000000', auth)).status).toBe(404);
   });
 
   it('expõe /metrics e /healthz', async () => {

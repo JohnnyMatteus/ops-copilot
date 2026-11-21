@@ -60,7 +60,7 @@ No nível `auto_execute`, qualquer um destes rebaixa para aprovação: ação ir
 
 Trade-offs assumidos:
 
-- **Orçamento em memória:** reinicia com o processo e não é compartilhado entre réplicas. O próximo passo é Redis com operação atômica.
+- **Orçamento no Redis (ADR 0011):** sobrevive a restart e é compartilhado entre réplicas, com consumo atômico em Lua. Se o Redis cai, o gate falha fechado: a ação passa a exigir aprovação.
 - **A confiança vem do modelo:** é autodeclarada e mal calibrada. Por isso ela só **rebaixa** o nível, nunca aumenta, e os evals medem se a calibração é razoável.
 - **Classificar reversibilidade é decisão humana:** fica no catálogo, revisado em PR.
 

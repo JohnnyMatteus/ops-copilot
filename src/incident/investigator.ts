@@ -22,6 +22,9 @@ export interface IncidentReport {
   readonly approvalId: string | null;
   readonly failure: string | null;
   readonly llmUsage: LlmUsage;
+  readonly steps: readonly string[];
+  readonly startedAt: string;
+  readonly finishedAt: string;
 }
 
 const DEDUP_TTL_MS = 6 * 60 * 60 * 1000;
@@ -41,6 +44,7 @@ export class Investigator {
   async investigate(alert: Alert): Promise<IncidentReport | null> {
     if (this.#isDuplicate(alert)) return null;
     const incidentId = randomUUID();
+    const startedAt = this.#deps.now().toISOString();
 
     return withSpan(
       this.#deps.tracer,
@@ -60,7 +64,7 @@ export class Investigator {
         });
         if (state.llmUsage.costUsd !== null) set({ 'ops_copilot.llm.cost_usd': state.llmUsage.costUsd });
         this.#deps.metrics.incidents.inc({ service: alert.service, outcome });
-        return {
+        const report: IncidentReport = {
           incidentId,
           service: alert.service,
           alertname: alert.alertname,
@@ -72,7 +76,12 @@ export class Investigator {
           approvalId: state.approvalId,
           failure: state.failure,
           llmUsage: state.llmUsage,
+          steps: state.steps,
+          startedAt,
+          finishedAt: this.#deps.now().toISOString(),
         };
+        await this.#deps.incidents.save(report);
+        return report;
       },
     );
   }

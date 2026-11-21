@@ -44,6 +44,8 @@ export const EnvSchema = z
     WEBHOOK_TOKEN: token,
     APPROVAL_TOKEN: token,
     OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
+    /** Vazio guarda orçamento, aprovações e incidentes em memória (perdidos no restart). */
+    REDIS_URL: z.url().optional(),
   })
   .superRefine((env, ctx) => {
     requireOpenRouterKey(env, ctx);

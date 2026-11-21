@@ -2,7 +2,7 @@
 import type { AuditLog } from '../autonomy/audit.js';
 import type { AutonomyGate, Decision } from '../autonomy/gate.js';
 import type { ActionExecutor, ExecutionResult } from '../executor/executor.js';
-import type { ApprovalStore } from './approvals.js';
+import type { ApprovalQueue } from './approvals.js';
 
 export type ApprovalOutcome =
   | { readonly status: 'executed'; readonly execution: ExecutionResult }
@@ -13,12 +13,12 @@ export type ApprovalOutcome =
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export class ApprovalService {
-  readonly #approvals: ApprovalStore;
+  readonly #approvals: ApprovalQueue;
   readonly #gate: AutonomyGate;
   readonly #executor: ActionExecutor;
   readonly #audit: AuditLog;
 
-  constructor(deps: { approvals: ApprovalStore; gate: AutonomyGate; executor: ActionExecutor; audit: AuditLog }) {
+  constructor(deps: { approvals: ApprovalQueue; gate: AutonomyGate; executor: ActionExecutor; audit: AuditLog }) {
     this.#approvals = deps.approvals;
     this.#gate = deps.gate;
     this.#executor = deps.executor;
@@ -27,7 +27,7 @@ export class ApprovalService {
 
   async resolve(approvalId: string, approver: string, approve: boolean): Promise<ApprovalOutcome> {
     if (!EMAIL.test(approver)) throw new Error('Aprovador precisa ser identificado por e-mail.');
-    const lookup = this.#approvals.take(approvalId);
+    const lookup = await this.#approvals.take(approvalId);
     if (lookup.status !== 'found') return { status: lookup.status };
     const { approval } = lookup;
     const actor = `human:${approver}`;

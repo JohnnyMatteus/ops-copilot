@@ -29,7 +29,6 @@ O ops-copilot automatiza a investigação e propõe a ação. A tese central é 
 - Executar ações de verdade em clusters ou filas. O executor é dry-run (ADR 0006).
 - Investigação livre de incidentes sem playbook (ADR 0009).
 - Interface de chat. As aprovações são via HTTP, e ChatOps vem depois.
-- Várias réplicas do copiloto. Orçamento e aprovações ficam em memória.
 - Detecção de anomalias. O gatilho é sempre um alerta.
 
 ## 3. Arquitetura
