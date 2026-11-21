@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { z } from 'zod';
+import type { ObjectStore } from '../storage/object-store.js';
 
 export const AuditEventSchema = z.enum([
   'alert_received',
@@ -60,7 +61,7 @@ function hashOf(record: Omit<AuditRecord, 'hash'>): string {
 }
 
 /** Encadeia registros e serializa escritas: a ordem do arquivo é a ordem dos eventos. */
-abstract class ChainedAuditLog implements AuditLog {
+export abstract class ChainedAuditLog implements AuditLog {
   #last: { seq: number; hash: string } | null = null;
   #queue: Promise<unknown> = Promise.resolve();
   readonly #now: () => Date;
@@ -79,7 +80,13 @@ abstract class ChainedAuditLog implements AuditLog {
         prevHash: last?.hash ?? GENESIS,
       };
       const record = AuditRecordSchema.parse({ ...unsigned, hash: hashOf(unsigned) });
-      await this.write(record);
+      try {
+        await this.write(record);
+      } catch (error) {
+        // Outra instância pode ter escrito antes: a próxima tentativa relê o fim da cadeia.
+        this.#last = null;
+        throw error;
+      }
       this.#last = { seq: record.seq, hash: record.hash };
       return record;
     });
@@ -154,4 +161,31 @@ export function verifyChain(records: readonly AuditRecord[]): ChainVerification 
     prevHash = hash;
   }
   return { valid: true };
+}
+
+/**
+ * Um objeto por registro num bucket com object lock (ADR 0010): o armazenamento recusa
+ * sobrescrita e remoção durante a retenção, e o encadeamento por hash revela lacunas.
+ */
+export class ObjectStoreAuditLog extends ChainedAuditLog {
+  readonly #store: ObjectStore;
+  readonly #prefix: string;
+
+  constructor(store: ObjectStore, prefix = 'audit/', now: () => Date = () => new Date()) {
+    super(now);
+    this.#store = store;
+    this.#prefix = prefix;
+  }
+
+  async records(): Promise<readonly AuditRecord[]> {
+    const keys = await this.#store.list(this.#prefix);
+    const bodies = await Promise.all(keys.map((key) => this.#store.get(key)));
+    return bodies.map((body) => AuditRecordSchema.parse(JSON.parse(body)));
+  }
+
+  protected async write(record: AuditRecord): Promise<void> {
+    // Sequência com zeros à esquerda: a ordem lexicográfica das chaves é a ordem dos eventos.
+    const key = `${this.#prefix}${String(record.seq).padStart(12, '0')}.json`;
+    await this.#store.putIfAbsent(key, JSON.stringify(record));
+  }
 }

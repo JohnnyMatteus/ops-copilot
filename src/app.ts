@@ -1,5 +1,5 @@
 // Raiz de composição: monta adaptadores reais a partir do ambiente. Único lugar que conhece todos.
-import { FileAuditLog } from './autonomy/audit.js';
+import { FileAuditLog, ObjectStoreAuditLog, type AuditLog } from './autonomy/audit.js';
 import { SlidingWindowBudget } from './autonomy/budget.js';
 import { AutonomyGate } from './autonomy/gate.js';
 import { loadAutonomyPolicy } from './autonomy/policy.js';
@@ -12,6 +12,7 @@ import { Investigator } from './incident/investigator.js';
 import { OpenAiCompatibleClient } from './llm/openai-compatible.js';
 import { loadPlaybooks } from './playbooks/registry.js';
 import { JaegerTraceSource } from './signals/jaeger.js';
+import { S3ObjectStore } from './storage/s3-object-store.js';
 import { PrometheusMetricsSource } from './signals/prometheus.js';
 import { InstrumentedLlmClient } from './telemetry/instrumented-llm.js';
 import type { Logger } from './telemetry/logger.js';
@@ -27,7 +28,7 @@ export async function createApp(env: Env, logger: Logger) {
   ]);
   const tracing = setupTracing({ otlpEndpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT, version: VERSION });
   const metrics = new CopilotMetrics();
-  const audit = new FileAuditLog(env.AUDIT_LOG_PATH);
+  const audit = createAuditLog(env);
   const gate = new AutonomyGate(policy, new SlidingWindowBudget());
   const executor = createExecutor(env.EXECUTION_MODE);
   const approvals = new ApprovalStore({ ttlMs: env.APPROVAL_TTL_MINUTES * 60_000 });
@@ -67,8 +68,14 @@ export async function createApp(env: Env, logger: Logger) {
   });
 
   logger.info(
-    { playbooks: playbooks.all.map((p) => `${p.metadata.id}@${p.metadata.version}`), executionMode: executor.mode, killSwitch: policy.killSwitch },
+    { playbooks: playbooks.all.map((p) => `${p.metadata.id}@${p.metadata.version}`), executionMode: executor.mode, auditSink: env.AUDIT_SINK, killSwitch: policy.killSwitch },
     'copiloto configurado',
   );
   return { server, shutdown: () => tracing.shutdown() };
+}
+
+function createAuditLog(env: Env): AuditLog {
+  if (env.AUDIT_SINK === 'file') return new FileAuditLog(env.AUDIT_LOG_PATH);
+  const store = new S3ObjectStore({ bucket: env.AUDIT_S3_BUCKET, region: env.AWS_REGION, endpoint: env.S3_ENDPOINT });
+  return new ObjectStoreAuditLog(store, env.AUDIT_S3_PREFIX);
 }

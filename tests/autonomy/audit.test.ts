@@ -2,7 +2,8 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { FileAuditLog, InMemoryAuditLog, verifyChain } from '../../src/autonomy/audit.js';
+import { FileAuditLog, InMemoryAuditLog, ObjectStoreAuditLog, verifyChain } from '../../src/autonomy/audit.js';
+import { InMemoryObjectStore, ObjectAlreadyExistsError } from '../../src/storage/object-store.js';
 
 const entry = (incidentId: string) => ({
   incidentId,
@@ -61,5 +62,41 @@ describe('trilha de auditoria', () => {
     const path = join(await mkdtemp(join(tmpdir(), 'ops-copilot-audit-')), 'audit.jsonl');
     await writeFile(path, '{"seq":0}\n');
     await expect(new FileAuditLog(path).append(entry('a'))).rejects.toThrow();
+  });
+});
+
+describe('auditoria em armazenamento de objetos', () => {
+  it('grava um objeto por registro, em ordem, e reconstrói a cadeia', async () => {
+    const store = new InMemoryObjectStore();
+    const audit = new ObjectStoreAuditLog(store, 'audit/');
+    for (const id of ['a', 'b', 'c']) await audit.append(entry(id));
+    expect(await store.list('audit/')).toEqual(['audit/000000000000.json', 'audit/000000000001.json', 'audit/000000000002.json']);
+    expect(verifyChain(await audit.records())).toEqual({ valid: true });
+  });
+
+  it('retoma a sequência a partir do bucket ao reiniciar', async () => {
+    const store = new InMemoryObjectStore();
+    await new ObjectStoreAuditLog(store).append(entry('a'));
+    const record = await new ObjectStoreAuditLog(store).append(entry('b'));
+    expect(record.seq).toBe(1);
+  });
+
+  it('duas instâncias disputando a mesma sequência: uma falha em vez de sobrescrever e a cadeia se mantém', async () => {
+    const store = new InMemoryObjectStore();
+    const first = new ObjectStoreAuditLog(store);
+    const second = new ObjectStoreAuditLog(store);
+    const results = await Promise.allSettled([first.append(entry('a')), second.append(entry('b'))]);
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(ObjectAlreadyExistsError);
+
+    // Quem perdeu relê o fim da cadeia na próxima escrita; o vencedor, desatualizado, também se recupera.
+    const [winner, loser] = results[0]?.status === 'rejected' ? [second, first] : [first, second];
+    await loser.append(entry('c'));
+    await expect(winner.append(entry('d'))).rejects.toBeInstanceOf(ObjectAlreadyExistsError);
+    await winner.append(entry('d'));
+    const records = await first.records();
+    expect(records).toHaveLength(3);
+    expect(verifyChain(records)).toEqual({ valid: true });
   });
 });

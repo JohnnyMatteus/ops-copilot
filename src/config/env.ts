@@ -30,7 +30,13 @@ export const EnvSchema = z
     JAEGER_URL: z.url().default('http://localhost:16686'),
     PLAYBOOKS_DIR: z.string().min(1).default('playbooks'),
     AUTONOMY_POLICY_FILE: z.string().min(1).default('config/autonomy-policy.yaml'),
+    AUDIT_SINK: z.enum(['file', 's3']).default('file'),
     AUDIT_LOG_PATH: z.string().min(1).default('var/audit.jsonl'),
+    AUDIT_S3_BUCKET: z.string().min(3).default('ops-copilot-audit'),
+    AUDIT_S3_PREFIX: z.string().default('audit/'),
+    AWS_REGION: z.string().min(1).default('us-east-1'),
+    /** Vazio usa a AWS; no ambiente local aponta para o MinIO. */
+    S3_ENDPOINT: z.url().optional(),
     EXECUTION_MODE: ExecutionModeSchema.default('dry-run'),
     APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(30),
     WEBHOOK_TOKEN: token,
