@@ -2,7 +2,8 @@
 import type { AuditLog } from '../autonomy/audit.js';
 import type { AutonomyGate, Decision } from '../autonomy/gate.js';
 import type { ActionExecutor, ExecutionResult } from '../executor/executor.js';
-import type { ApprovalQueue } from './approvals.js';
+import type { CopilotMetrics } from '../telemetry/metrics.js';
+import type { ApprovalQueue, PendingApproval } from './approvals.js';
 
 export type ApprovalOutcome =
   | { readonly status: 'executed'; readonly execution: ExecutionResult }
@@ -17,23 +18,36 @@ export class ApprovalService {
   readonly #gate: AutonomyGate;
   readonly #executor: ActionExecutor;
   readonly #audit: AuditLog;
+  readonly #metrics: CopilotMetrics;
 
-  constructor(deps: { approvals: ApprovalQueue; gate: AutonomyGate; executor: ActionExecutor; audit: AuditLog }) {
+  constructor(deps: {
+    approvals: ApprovalQueue;
+    gate: AutonomyGate;
+    executor: ActionExecutor;
+    audit: AuditLog;
+    metrics: CopilotMetrics;
+  }) {
     this.#approvals = deps.approvals;
     this.#gate = deps.gate;
     this.#executor = deps.executor;
     this.#audit = deps.audit;
+    this.#metrics = deps.metrics;
   }
 
   async resolve(approvalId: string, approver: string, approve: boolean): Promise<ApprovalOutcome> {
     if (!EMAIL.test(approver)) throw new Error('Aprovador precisa ser identificado por e-mail.');
     const lookup = await this.#approvals.take(approvalId);
     if (lookup.status !== 'found') return { status: lookup.status };
-    const { approval } = lookup;
+    const outcome = await this.#resolveFound(lookup.approval, approver, approve);
+    this.#metrics.approvals.inc({ service: lookup.approval.gateInput.service, outcome: outcome.status });
+    return outcome;
+  }
+
+  async #resolveFound(approval: PendingApproval, approver: string, approve: boolean): Promise<ApprovalOutcome> {
     const actor = `human:${approver}`;
 
     if (!approve) {
-      await this.#audit.append({ incidentId: approval.incidentId, event: 'approval_rejected', actor, details: { approvalId } });
+      await this.#audit.append({ incidentId: approval.incidentId, event: 'approval_rejected', actor, details: { approvalId: approval.id } });
       return { status: 'rejected' };
     }
 
@@ -43,12 +57,12 @@ export class ApprovalService {
         incidentId: approval.incidentId,
         event: 'approval_rejected',
         actor: 'copilot',
-        details: { approvalId, approver, reasons: decision.reasons },
+        details: { approvalId: approval.id, approver, reasons: decision.reasons },
       });
       return { status: 'blocked', decision };
     }
 
-    await this.#audit.append({ incidentId: approval.incidentId, event: 'approval_granted', actor, details: { approvalId } });
+    await this.#audit.append({ incidentId: approval.incidentId, event: 'approval_granted', actor, details: { approvalId: approval.id } });
     const action = decision.action;
     const execution: ExecutionResult = await this.#executor
       .execute(action, { incidentId: approval.incidentId, service: approval.gateInput.service, authorizedBy: actor })

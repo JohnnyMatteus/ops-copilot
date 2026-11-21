@@ -101,9 +101,12 @@ describe('grafo de investigação', () => {
     expect(report?.execution).toBeNull();
     expect(await approvals.list()).toHaveLength(1);
 
-    const service = new ApprovalService({ approvals, gate, executor: deps.executor, audit });
+    const service = new ApprovalService({ approvals, gate, executor: deps.executor, audit, metrics: deps.metrics });
     const outcome = await service.resolve(report?.approvalId ?? '', 'plantonista@example.com', true);
     expect(outcome).toMatchObject({ status: 'executed', execution: { status: 'dry_run', actionId: 'replay_dlq_batch' } });
+    expect(await deps.metrics.registry.getSingleMetricAsString('ops_copilot_approvals_total')).toContain(
+      'ops_copilot_approvals_total{service="payments-events-go",outcome="executed"} 1',
+    );
 
     const tail = (await audit.records()).slice(-2);
     expect(tail.map((r) => [r.event, r.actor])).toEqual([
@@ -130,7 +133,7 @@ describe('grafo de investigação', () => {
       proposal: { actionId: 'notify_oncall', params: {} },
     });
     now = 5_000;
-    const service = new ApprovalService({ approvals, gate, executor: deps.executor, audit });
+    const service = new ApprovalService({ approvals, gate, executor: deps.executor, audit, metrics: deps.metrics });
     expect(await service.resolve(pending.id, 'plantonista@example.com', true)).toEqual({ status: 'expired' });
     expect(await audit.records()).toHaveLength(0);
   });

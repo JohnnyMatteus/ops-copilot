@@ -38,6 +38,7 @@ export async function createApp(env: Env, logger: Logger) {
   const gate = new AutonomyGate(policy, state.budget);
   const executor = createExecutor(env.EXECUTION_MODE);
   const { approvals, incidents } = state;
+  metrics.observePendingApprovals(async () => (await approvals.list()).length);
   const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
 
   const investigator = new Investigator({
@@ -65,7 +66,7 @@ export async function createApp(env: Env, logger: Logger) {
     approvals,
     incidents,
     audit,
-    approvalService: new ApprovalService({ approvals, gate, executor, audit }),
+    approvalService: new ApprovalService({ approvals, gate, executor, audit, metrics }),
     registry: metrics.registry,
     logger,
     webhookToken: env.WEBHOOK_TOKEN,
