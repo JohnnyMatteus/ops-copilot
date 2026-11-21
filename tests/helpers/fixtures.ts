@@ -1,5 +1,6 @@
 // Dependências do grafo com dublês: LLM falso, fontes de sinais fixas, auditoria em memória.
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace';
+import type { Operator } from '../../src/auth/operator.js';
 import { InMemoryAuditLog } from '../../src/autonomy/audit.js';
 import { InMemoryActionBudget, type ActionBudget } from '../../src/autonomy/budget.js';
 import { AutonomyGate } from '../../src/autonomy/gate.js';
@@ -31,7 +32,8 @@ export async function testDeps(overrides: TestDepsOverrides) {
   const incidents = new InMemoryIncidentRepository();
   const approvals = new InMemoryApprovalQueue({ ttlMs: 30 * 60_000, now: () => FIXED_NOW.getTime() });
   const metrics = new CopilotMetrics();
-  const gate = new AutonomyGate(overrides.policy ?? (await realPolicy()), overrides.budget ?? new InMemoryActionBudget(() => FIXED_NOW.getTime()));
+  const budget = overrides.budget ?? new InMemoryActionBudget(() => FIXED_NOW.getTime());
+  const gate = new AutonomyGate(overrides.policy ?? (await realPolicy()), budget);
   const deps: InvestigationDeps = {
     playbooks: await realPlaybooks(),
     metricsSource: overrides.metricsSource,
@@ -47,5 +49,8 @@ export async function testDeps(overrides: TestDepsOverrides) {
     metrics,
     now: () => FIXED_NOW,
   };
-  return { deps, spans, audit, approvals, incidents, metrics, gate };
+  return { deps, spans, audit, approvals, incidents, metrics, gate, budget };
 }
+
+export const PLANTONISTA: Operator = { email: 'plantonista@example.com', name: 'plantonista', via: 'token' };
+export const LIDER: Operator = { email: 'lider@example.com', name: 'lider', via: 'token' };

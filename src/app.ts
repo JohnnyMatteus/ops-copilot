@@ -1,6 +1,7 @@
 // Raiz de composição: monta adaptadores reais a partir do ambiente. Único lugar que conhece todos.
 import { FileAuditLog, ObjectStoreAuditLog, type AuditLog } from './autonomy/audit.js';
 import { InMemoryActionBudget, type ActionBudget } from './autonomy/budget.js';
+import { ChainAuthenticator, OidcAuthenticator, parseOperatorTokens, StaticTokenAuthenticator, type OperatorAuthenticator } from './auth/operator.js';
 import { AutonomyGate } from './autonomy/gate.js';
 import { RedisActionBudget } from './autonomy/redis-budget.js';
 import { loadAutonomyPolicy } from './autonomy/policy.js';
@@ -66,11 +67,26 @@ export async function createApp(env: Env, logger: Logger) {
     approvals,
     incidents,
     audit,
-    approvalService: new ApprovalService({ approvals, gate, executor, audit, metrics }),
+    approvalService: new ApprovalService({ approvals, incidents, gate, executor, audit, metrics }),
+    authenticator: createAuthenticator(env),
+    policy,
+    playbooks,
+    budget: state.budget,
+    policySource: { file: env.AUTONOMY_POLICY_FILE, commit: env.GIT_COMMIT },
+    playbooksSource: { file: env.PLAYBOOKS_DIR, commit: env.GIT_COMMIT },
+    config: {
+      version: VERSION,
+      executionMode: executor.mode,
+      llmProvider: env.LLM_PROVIDER,
+      tokenLogin: Boolean(env.OPERATOR_TOKENS),
+      oidc: env.OIDC_ISSUER_URL
+        ? { issuer: env.OIDC_ISSUER_URL, clientId: env.OIDC_CLIENT_ID, audience: env.OIDC_AUDIENCE }
+        : null,
+      jaegerUrl: env.JAEGER_PUBLIC_URL ?? null,
+    },
     registry: metrics.registry,
     logger,
     webhookToken: env.WEBHOOK_TOKEN,
-    approvalToken: env.APPROVAL_TOKEN,
   });
 
   logger.info(
@@ -120,6 +136,16 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
       await redis.quit();
     },
   };
+}
+
+/** Token de dev e OIDC podem coexistir; um JWT nunca casa com um token estático e vice-versa. */
+function createAuthenticator(env: Env): OperatorAuthenticator {
+  const chain: OperatorAuthenticator[] = [];
+  if (env.OPERATOR_TOKENS) chain.push(new StaticTokenAuthenticator(parseOperatorTokens(env.OPERATOR_TOKENS)));
+  if (env.OIDC_ISSUER_URL) {
+    chain.push(new OidcAuthenticator({ issuer: env.OIDC_ISSUER_URL, audience: env.OIDC_AUDIENCE, jwksUrl: env.OIDC_JWKS_URL }));
+  }
+  return new ChainAuthenticator(chain);
 }
 
 function createAuditLog(env: Env): AuditLog {

@@ -5,10 +5,12 @@ import type { Alert } from '../domain/alert.js';
 import type { ExecutionResult } from '../executor/executor.js';
 import type { InvestigationDeps } from '../graph/deps.js';
 import { buildInvestigationGraph, type InvestigationGraph } from '../graph/graph.js';
-import type { Outcome } from '../graph/state.js';
+import type { Outcome, StepRecord } from '../graph/state.js';
+import type { Signal } from '../signals/types.js';
 import type { LlmUsage } from '../llm/structured.js';
 import { withSpan } from '../telemetry/tracing.js';
 import type { Diagnosis } from './diagnosis.js';
+import type { Resolution } from './incidents.js';
 
 export interface IncidentReport {
   readonly incidentId: string;
@@ -20,9 +22,19 @@ export interface IncidentReport {
   readonly decision: Decision | null;
   readonly execution: ExecutionResult | null;
   readonly approvalId: string | null;
+  /** Prazo da aprovação pendente; passado o prazo sem decisão, o pedido expira. */
+  readonly approvalExpiresAt: string | null;
   readonly failure: string | null;
   readonly llmUsage: LlmUsage;
   readonly steps: readonly string[];
+  readonly timeline: readonly StepRecord[];
+  /** Evidências coletadas, incluindo as fontes que falharam. */
+  readonly signals: readonly Signal[];
+  readonly severity: string;
+  readonly alertStartedAt: string;
+  readonly alertSummary: string | null;
+  /** Decisão humana posterior (aprovação, recusa ou cancelamento); `null` enquanto ninguém decidiu. */
+  readonly resolution: Resolution | null;
   readonly startedAt: string;
   readonly finishedAt: string;
 }
@@ -74,9 +86,16 @@ export class Investigator {
           decision: state.decision,
           execution: state.execution,
           approvalId: state.approvalId,
+          approvalExpiresAt: state.approvalExpiresAt,
           failure: state.failure,
           llmUsage: state.llmUsage,
           steps: state.steps,
+          timeline: state.timeline,
+          signals: state.signals,
+          severity: alert.severity,
+          alertStartedAt: alert.startsAt,
+          alertSummary: alert.annotations['summary'] ?? null,
+          resolution: null,
           startedAt,
           finishedAt: this.#deps.now().toISOString(),
         };

@@ -1,5 +1,16 @@
 // Porta do repositório de incidentes investigados (lido pela API) e o adaptador em memória.
+import type { ExecutionResult } from '../executor/executor.js';
 import type { IncidentReport } from './investigator.js';
+
+/** Decisão humana sobre o incidente. A identidade vem da credencial do operador, nunca do corpo. */
+export interface Resolution {
+  readonly kind: 'approved' | 'rejected' | 'cancelled' | 'blocked';
+  readonly by: string;
+  /** Obrigatório na recusa e no cancelamento; opcional na aprovação. */
+  readonly reason: string | null;
+  readonly at: string;
+  readonly execution: ExecutionResult | null;
+}
 
 export interface IncidentRepository {
   save(report: IncidentReport): Promise<void>;

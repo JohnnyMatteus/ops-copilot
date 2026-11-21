@@ -1,5 +1,6 @@
 // Configuração por variáveis de ambiente, validada na subida. Erro cita a variável, nunca o valor.
 import { z } from 'zod';
+import { parseOperatorTokens } from '../auth/operator.js';
 import { ExecutionModeSchema } from '../executor/executor.js';
 
 const token = z.string().min(16, 'use pelo menos 16 caracteres');
@@ -42,15 +43,36 @@ export const EnvSchema = z
     EXECUTION_MODE: ExecutionModeSchema.default('dry-run'),
     APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(30),
     WEBHOOK_TOKEN: token,
-    APPROVAL_TOKEN: token,
+    /** Operadores do ambiente local (ADR 0012): `email=token,email2=token2`. */
+    OPERATOR_TOKENS: z.string().optional(),
+    /** OIDC opcional (Keycloak do platform-edge): com o emissor definido, aceita access tokens JWT. */
+    OIDC_ISSUER_URL: z.url().optional(),
+    OIDC_AUDIENCE: z.string().min(1).default('ops-copilot'),
+    OIDC_JWKS_URL: z.url().optional(),
+    /** Cliente público (PKCE) que o painel usa para o login OIDC. */
+    OIDC_CLIENT_ID: z.string().min(1).default('ops-copilot-web'),
+    /** Endereço do Jaeger visto pelo navegador, para o link do trace de cada investigação. */
+    JAEGER_PUBLIC_URL: z.url().optional(),
+    /** Commit da política e dos playbooks carregados, mostrado no painel. */
+    GIT_COMMIT: z.string().min(1).default('desconhecido'),
     OTEL_EXPORTER_OTLP_ENDPOINT: z.url().optional(),
     /** Vazio guarda orçamento, aprovações e incidentes em memória (perdidos no restart). */
     REDIS_URL: z.url().optional(),
   })
   .superRefine((env, ctx) => {
     requireOpenRouterKey(env, ctx);
-    if (env.WEBHOOK_TOKEN === env.APPROVAL_TOKEN) {
-      ctx.addIssue({ code: 'custom', path: ['APPROVAL_TOKEN'], message: 'precisa ser diferente de WEBHOOK_TOKEN' });
+    if (!env.OPERATOR_TOKENS && !env.OIDC_ISSUER_URL) {
+      ctx.addIssue({ code: 'custom', path: ['OPERATOR_TOKENS'], message: 'defina OPERATOR_TOKENS ou OIDC_ISSUER_URL' });
+    }
+    if (env.OPERATOR_TOKENS) {
+      try {
+        const tokens = parseOperatorTokens(env.OPERATOR_TOKENS);
+        if ([...tokens.values()].includes(env.WEBHOOK_TOKEN)) {
+          ctx.addIssue({ code: 'custom', path: ['OPERATOR_TOKENS'], message: 'nenhum token pode ser igual a WEBHOOK_TOKEN' });
+        }
+      } catch (error) {
+        ctx.addIssue({ code: 'custom', path: ['OPERATOR_TOKENS'], message: (error as Error).message });
+      }
     }
   });
 export type Env = z.infer<typeof EnvSchema>;

@@ -13,7 +13,7 @@ export const URLS = {
 
 export const TOKENS = {
   webhook: process.env['WEBHOOK_TOKEN'] ?? 'dev-only-webhook-token-change-me',
-  operador: process.env['APPROVAL_TOKEN'] ?? 'dev-only-approval-token-change-me',
+  operador: process.env['OPERATOR_TOKEN'] ?? 'dev-only-operador-plantao',
 };
 
 export const MINIO_ADMIN = {
