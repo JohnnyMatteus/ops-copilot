@@ -1,0 +1,13 @@
+# Sobreposição usada por `make evidencia`: o incidente fica ativo desde a subida (as métricas
+# sintéticas param no estado de alerta em vez de seguir o ciclo senoidal) e o diagnóstico vem do
+# modelo roteirizado, porque a gravação não tem LLM real. Prometheus, Alertmanager, Jaeger, Redis e
+# MinIO são os mesmos do `make up`.
+services:
+  ops-copilot:
+    environment:
+      LLM_PROVIDER: scripted
+      LLM_MODEL: scripted-demo
+      LLM_SCRIPT_FILE: config/scripted-llm.yaml
+  prometheus:
+    volumes:
+      - ./deploy/prometheus/incident-rules.yml:/etc/prometheus/synthetic-rules.yml:ro
