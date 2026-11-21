@@ -1,9 +1,16 @@
-// Orçamento de ações automáticas por serviço numa janela deslizante.
-// Em memória: reinicia com o processo (trade-off registrado no roteiro de limites de autonomia).
+// Porta do orçamento de ações automáticas por serviço numa janela deslizante, e o adaptador em
+// memória usado em testes e no desenvolvimento sem Redis. Em produção o adaptador é o Redis
+// (redis-budget.ts): o saldo sobrevive a restart e é compartilhado entre réplicas.
 
 export type Clock = () => number;
 
-export class SlidingWindowBudget {
+export interface ActionBudget {
+  remaining(service: string, windowMs: number, max: number): Promise<number>;
+  /** Verifica e consome de forma atômica: duas investigações simultâneas não estouram o limite. */
+  tryConsume(service: string, windowMs: number, max: number): Promise<boolean>;
+}
+
+export class InMemoryActionBudget implements ActionBudget {
   readonly #executions = new Map<string, number[]>();
   readonly #now: Clock;
 
@@ -11,15 +18,12 @@ export class SlidingWindowBudget {
     this.#now = now;
   }
 
-  remaining(service: string, windowMs: number, max: number): number {
+  async remaining(service: string, windowMs: number, max: number): Promise<number> {
     return Math.max(0, max - this.#recent(service, windowMs).length);
   }
 
-  /**
-   * Verifica e consome numa única chamada síncrona: no event loop do Node não há intercalação
-   * entre a checagem e o registro, então duas investigações simultâneas não estouram o limite.
-   */
-  tryConsume(service: string, windowMs: number, max: number): boolean {
+  // Sem await entre a checagem e o registro: no event loop não há intercalação.
+  async tryConsume(service: string, windowMs: number, max: number): Promise<boolean> {
     const recent = this.#recent(service, windowMs);
     if (recent.length >= max) return false;
     recent.push(this.#now());

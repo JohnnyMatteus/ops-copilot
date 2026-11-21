@@ -70,9 +70,12 @@ jobs:
         run: |
           docker compose --profile core --profile observability --profile tools config -q
           docker compose -f docker-compose.yml -f docker-compose.portfolio.yml --profile core config -q
+          docker compose -f docker-compose.yml -f docker-compose.evidencia.yml --profile core --profile observability config -q
 
       - name: Validar configuração do Prometheus
-        run: docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+        run: |
+          docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm -v "$PWD/deploy/prometheus:/etc/prometheus:ro" --entrypoint promtool prom/prometheus:v3.5.0 check rules /etc/prometheus/incident-rules.yml
 
       - name: Validar configuração do Alertmanager
         run: docker run --rm -v "$PWD/deploy/alertmanager:/etc/alertmanager:ro" --entrypoint amtool prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml

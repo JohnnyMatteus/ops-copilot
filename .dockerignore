@@ -11,3 +11,4 @@ evals/reports
 docs
 tests
 *.md
+e2e

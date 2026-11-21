@@ -1,0 +1,12 @@
+{
+  "name": "ops-copilot-evidencia",
+  "private": true,
+  "type": "module",
+  "description": "Vídeo de evidência do fluxo principal do ops-copilot, gravado com Playwright contra a stack real.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

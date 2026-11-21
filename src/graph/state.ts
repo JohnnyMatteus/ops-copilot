@@ -36,6 +36,8 @@ export const InvestigationState = Annotation.Root({
   failure: value<string | null>(() => null),
   outcome: value<Outcome | null>(() => null),
   llmUsage: value<LlmUsage>(() => EMPTY_USAGE),
+  /** Etapas percorridas, na ordem. */
+  steps: Annotation<string[]>({ reducer: (current, next) => [...current, ...next], default: () => [] }),
 });
 
 export type InvestigationStateType = typeof InvestigationState.State;

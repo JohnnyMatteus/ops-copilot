@@ -4,12 +4,13 @@ import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { InMemoryAuditLog } from '../src/autonomy/audit.js';
-import { SlidingWindowBudget } from '../src/autonomy/budget.js';
+import { InMemoryActionBudget } from '../src/autonomy/budget.js';
 import { AutonomyGate } from '../src/autonomy/gate.js';
 import type { AutonomyPolicy } from '../src/autonomy/policy.js';
 import { DryRunExecutor } from '../src/executor/executor.js';
 import { OutcomeSchema, type Outcome } from '../src/graph/state.js';
-import { ApprovalStore } from '../src/incident/approvals.js';
+import { InMemoryApprovalQueue } from '../src/incident/approvals.js';
+import { InMemoryIncidentRepository } from '../src/incident/incidents.js';
 import { Investigator } from '../src/incident/investigator.js';
 import type { LlmClient } from '../src/llm/client.js';
 import { EMPTY_USAGE, type LlmUsage } from '../src/llm/structured.js';
@@ -110,9 +111,10 @@ export async function runEvals(options: EvalOptions): Promise<EvalReport> {
       traceSource: new FixtureTraceSource(evalCase.traces),
       llm: options.llmFor(evalCase.id),
       model: options.model,
-      gate: new AutonomyGate(options.policy, new SlidingWindowBudget(() => now.getTime())),
+      gate: new AutonomyGate(options.policy, new InMemoryActionBudget(() => now.getTime())),
       executor: new DryRunExecutor(),
-      approvals: new ApprovalStore({ ttlMs: 60_000, now: () => now.getTime() }),
+      approvals: new InMemoryApprovalQueue({ ttlMs: 60_000, now: () => now.getTime() }),
+      incidents: new InMemoryIncidentRepository(),
       audit: new InMemoryAuditLog(() => now),
       tracer: tracing.tracer,
       metrics: new CopilotMetrics(),

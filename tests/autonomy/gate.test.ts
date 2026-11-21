@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { SlidingWindowBudget } from '../../src/autonomy/budget.js';
+import { InMemoryActionBudget, type ActionBudget } from '../../src/autonomy/budget.js';
 import { AutonomyGate, evaluate, type GateInput } from '../../src/autonomy/gate.js';
 import { resolveServicePolicy, type AutonomyPolicy } from '../../src/autonomy/policy.js';
 import type { Playbook } from '../../src/playbooks/schema.js';
@@ -209,27 +209,37 @@ describe('evaluate: rebaixamentos de nível', () => {
 });
 
 describe('AutonomyGate', () => {
-  it('consome o orçamento só em execuções automáticas e rebaixa quando acaba', () => {
+  it('consome o orçamento só em execuções automáticas e rebaixa quando acaba', async () => {
     let now = 0;
-    const gate = new AutonomyGate(basePolicy, new SlidingWindowBudget(() => now));
-    expect(gate.decide(saasFlagInput()).verdict).toBe('auto_execute');
-    expect(gate.decide(saasFlagInput({ confidence: 0.1 })).verdict).toBe('needs_approval');
-    expect(gate.decide(saasFlagInput()).verdict).toBe('auto_execute');
-    expect(gate.decide(saasFlagInput()).verdict).toBe('needs_approval');
+    const gate = new AutonomyGate(basePolicy, new InMemoryActionBudget(() => now));
+    expect((await gate.decide(saasFlagInput())).verdict).toBe('auto_execute');
+    expect((await gate.decide(saasFlagInput({ confidence: 0.1 }))).verdict).toBe('needs_approval');
+    expect((await gate.decide(saasFlagInput())).verdict).toBe('auto_execute');
+    expect((await gate.decide(saasFlagInput())).verdict).toBe('needs_approval');
 
     now += 60 * 60 * 1000 + 1; // janela de 1h passou
-    expect(gate.decide(saasFlagInput()).verdict).toBe('auto_execute');
+    expect((await gate.decide(saasFlagInput())).verdict).toBe('auto_execute');
+  });
+
+  it('orçamento indisponível falha fechado: exige aprovação em vez de executar', async () => {
+    const down: ActionBudget = {
+      remaining: () => Promise.reject(new Error('redis fora')),
+      tryConsume: () => Promise.reject(new Error('redis fora')),
+    };
+    const decision = await new AutonomyGate(basePolicy, down).decide(saasFlagInput());
+    expect(decision.verdict).toBe('needs_approval');
+    expect(decision.reasons.join(' ')).toMatch(/indisponível/);
   });
 
   it('aprovação humana não contorna bloqueio da política vigente', () => {
-    const gate = new AutonomyGate(withPolicy({ killSwitch: true }), new SlidingWindowBudget());
+    const gate = new AutonomyGate(withPolicy({ killSwitch: true }), new InMemoryActionBudget());
     const decision = gate.authorizeApproved(saasFlagInput());
     expect(decision.verdict).toBe('blocked');
     expect(decision.reasons.at(-1)).toMatch(/Aprovação recusada/);
   });
 
   it('aprovação humana autoriza ação irreversível que a política permite com aprovação', () => {
-    const gate = new AutonomyGate(basePolicy, new SlidingWindowBudget());
+    const gate = new AutonomyGate(basePolicy, new InMemoryActionBudget());
     const decision = gate.authorizeApproved({
       service: 'payments-events-go',
       playbook: payments,

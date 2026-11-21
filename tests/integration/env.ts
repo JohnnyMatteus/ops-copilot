@@ -13,3 +13,4 @@ export const ADMIN = {
   accessKeyId: process.env['MINIO_ROOT_USER'] ?? 'ops-copilot-admin',
   secretAccessKey: process.env['MINIO_ROOT_PASSWORD'] ?? 'dev-only-change-me',
 };
+export const REDIS_URL = process.env['IT_REDIS_URL'] ?? `redis://localhost:${port('REDIS_PORT', 6379)}`;

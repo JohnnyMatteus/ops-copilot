@@ -16,7 +16,9 @@ services:
     budget: { window: 1h, maxAutoActions: 0 }
   kafka-telemetry:
     level: auto_execute
-    allowedActions: [notify_oncall, scale_deployment, restart_pods, reset_consumer_offsets]
+    # reset_consumer_offsets fica fora: pode perder leituras, então o gate bloqueia mesmo que o
+    # playbook a cite; o relatório ainda mostra a proposta para o plantão decidir à mão.
+    allowedActions: [notify_oncall, scale_deployment, restart_pods]
     budget: { window: 30m, maxAutoActions: 3 }
   saas-multitenant:
     level: auto_execute

@@ -2,7 +2,7 @@
 // Nenhuma regra daqui depende do prompt; o LLM só propõe, quem decide é este módulo.
 import { z } from 'zod';
 import type { Playbook } from '../playbooks/schema.js';
-import type { SlidingWindowBudget } from './budget.js';
+import type { ActionBudget } from './budget.js';
 import { findAction } from './catalog.js';
 import { mostRestrictive, type AutonomyLevel } from './levels.js';
 import { resolveServicePolicy, type AutonomyPolicy, type ResolvedServicePolicy } from './policy.js';
@@ -107,19 +107,28 @@ export function evaluate(input: GateInput, service: ResolvedServicePolicy, budge
 
 export class AutonomyGate {
   readonly #policy: AutonomyPolicy;
-  readonly #budget: SlidingWindowBudget;
+  readonly #budget: ActionBudget;
 
-  constructor(policy: AutonomyPolicy, budget: SlidingWindowBudget) {
+  constructor(policy: AutonomyPolicy, budget: ActionBudget) {
     this.#policy = policy;
     this.#budget = budget;
   }
 
-  /** Decide e, se a execução for automática, consome o orçamento na mesma chamada síncrona. */
-  decide(input: GateInput): Decision {
+  /**
+   * Decide e, se a execução for automática, consome o orçamento numa operação atômica.
+   * Orçamento indisponível (Redis fora) falha fechado: a ação passa a exigir aprovação humana.
+   */
+  async decide(input: GateInput): Promise<Decision> {
     const service = resolveServicePolicy(this.#policy, input.service);
     const { windowMs, maxAutoActions } = service.budget;
-    const decision = evaluate(input, service, this.#budget.remaining(input.service, windowMs, maxAutoActions));
-    if (decision.verdict === 'auto_execute' && !this.#budget.tryConsume(input.service, windowMs, maxAutoActions)) {
+    const remaining = await this.#budget.remaining(input.service, windowMs, maxAutoActions).catch(() => null);
+    const decision = evaluate(input, service, remaining ?? 0);
+    if (remaining === null && decision.verdict === 'needs_approval') {
+      return { ...decision, reasons: [...decision.reasons, 'Orçamento indisponível: exige aprovação.'] };
+    }
+    if (decision.verdict !== 'auto_execute') return decision;
+    const consumed = await this.#budget.tryConsume(input.service, windowMs, maxAutoActions).catch(() => false);
+    if (!consumed) {
       return { ...decision, verdict: 'needs_approval', effectiveLevel: 'execute_with_approval', reasons: ['Orçamento esgotado.'] };
     }
     return decision;

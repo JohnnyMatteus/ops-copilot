@@ -2,33 +2,33 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { SlidingWindowBudget } from '../../src/autonomy/budget.js';
+import { InMemoryActionBudget } from '../../src/autonomy/budget.js';
 import { mostRestrictive } from '../../src/autonomy/levels.js';
 import { loadAutonomyPolicy, PolicyValidationError, resolveServicePolicy } from '../../src/autonomy/policy.js';
 import { realPolicy } from '../helpers/repo.js';
 
-describe('SlidingWindowBudget', () => {
-  it('libera de novo conforme execuções saem da janela', () => {
+describe('InMemoryActionBudget', () => {
+  it('libera de novo conforme execuções saem da janela', async () => {
     let now = 1_000;
-    const budget = new SlidingWindowBudget(() => now);
-    expect(budget.tryConsume('svc', 10_000, 2)).toBe(true);
+    const budget = new InMemoryActionBudget(() => now);
+    expect(await budget.tryConsume('svc', 10_000, 2)).toBe(true);
     now += 5_000;
-    expect(budget.tryConsume('svc', 10_000, 2)).toBe(true);
-    expect(budget.tryConsume('svc', 10_000, 2)).toBe(false);
-    expect(budget.remaining('svc', 10_000, 2)).toBe(0);
+    expect(await budget.tryConsume('svc', 10_000, 2)).toBe(true);
+    expect(await budget.tryConsume('svc', 10_000, 2)).toBe(false);
+    expect(await budget.remaining('svc', 10_000, 2)).toBe(0);
     now += 5_001; // a primeira saiu da janela
-    expect(budget.remaining('svc', 10_000, 2)).toBe(1);
+    expect(await budget.remaining('svc', 10_000, 2)).toBe(1);
   });
 
-  it('orçamento zero nunca libera', () => {
-    expect(new SlidingWindowBudget().tryConsume('svc', 60_000, 0)).toBe(false);
+  it('orçamento zero nunca libera', async () => {
+    expect(await new InMemoryActionBudget().tryConsume('svc', 60_000, 0)).toBe(false);
   });
 
-  it('serviços têm saldos independentes', () => {
-    const budget = new SlidingWindowBudget(() => 0);
-    expect(budget.tryConsume('a', 60_000, 1)).toBe(true);
-    expect(budget.tryConsume('b', 60_000, 1)).toBe(true);
-    expect(budget.tryConsume('a', 60_000, 1)).toBe(false);
+  it('serviços têm saldos independentes', async () => {
+    const budget = new InMemoryActionBudget(() => 0);
+    expect(await budget.tryConsume('a', 60_000, 1)).toBe(true);
+    expect(await budget.tryConsume('b', 60_000, 1)).toBe(true);
+    expect(await budget.tryConsume('a', 60_000, 1)).toBe(false);
   });
 });
 

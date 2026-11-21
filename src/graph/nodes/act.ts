@@ -15,7 +15,7 @@ export function createActNode(deps: InvestigationDeps) {
       case 'suggest':
         return { outcome: 'suggested' };
       case 'needs_approval': {
-        const approval = deps.approvals.request(incidentId, {
+        const approval = await deps.approvals.request(incidentId, {
           service: alert.service,
           playbook,
           hypothesisId: diagnosis.hypothesisId,

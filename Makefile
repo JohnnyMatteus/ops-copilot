@@ -38,7 +38,7 @@ dev: ## Roda o copiloto no host com recarga (usa .env)
 test: ## Lint, typecheck, testes unitários e evals com modelo falso
 	pnpm lint && pnpm typecheck && pnpm test && pnpm eval
 
-test-integration: ## Testes contra Prometheus, Jaeger e MinIO do compose (rode make up antes)
+test-integration: ## Testes contra Prometheus, Jaeger, MinIO e Redis do compose (rode make up antes)
 	pnpm test:integration
 
 lint: ## Lint e typecheck

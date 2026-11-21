@@ -8,7 +8,7 @@ import { loadAutonomyPolicy } from '../src/autonomy/policy.js';
 import { loadLlmEnv } from '../src/config/env.js';
 import type { LlmClient } from '../src/llm/client.js';
 import { FakeLlmClient } from '../src/llm/fake.js';
-import { OpenAiCompatibleClient } from '../src/llm/openai-compatible.js';
+import { createLlmClient } from '../src/llm/factory.js';
 import { loadPlaybooks } from '../src/playbooks/registry.js';
 import { formatReport, loadDataset, runEvals } from './harness.js';
 
@@ -35,7 +35,7 @@ if (mode === 'fake') {
 } else {
   const env = loadLlmEnv();
   model = env.LLM_MODEL;
-  const client = new OpenAiCompatibleClient({ provider: env.LLM_PROVIDER, baseUrl: env.LLM_BASE_URL, apiKey: env.OPENROUTER_API_KEY });
+  const client = await createLlmClient(env);
   llmFor = () => client;
 }
 

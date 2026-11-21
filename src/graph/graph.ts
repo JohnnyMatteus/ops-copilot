@@ -23,7 +23,7 @@ function instrument(deps: InvestigationDeps, name: NodeName, node: Node): Node {
       try {
         const update = await node(state);
         if (update.outcome) set({ 'ops_copilot.outcome': update.outcome });
-        return update;
+        return { ...update, steps: [name] };
       } finally {
         stopTimer();
       }

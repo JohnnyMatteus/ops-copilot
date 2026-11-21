@@ -1,11 +1,14 @@
-// Borda HTTP: webhook do Alertmanager, aprovações humanas, /metrics e /healthz. Só node:http.
+// Borda HTTP: webhook do Alertmanager, aprovações humanas, incidentes, verificação da auditoria,
+// /metrics e /healthz. Só node:http.
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Registry } from 'prom-client';
 import { z } from 'zod';
 import { AlertmanagerWebhookSchema, firingAlerts, InvalidAlertError, type Alert } from '../domain/alert.js';
+import { verifyChain, type AuditLog } from '../autonomy/audit.js';
 import type { ApprovalService } from '../incident/approval-service.js';
-import type { ApprovalStore } from '../incident/approvals.js';
+import type { ApprovalQueue } from '../incident/approvals.js';
+import type { IncidentRepository } from '../incident/incidents.js';
 import type { Logger } from '../telemetry/logger.js';
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -17,7 +20,9 @@ const ApprovalBodySchema = z.strictObject({
 
 export interface ServerDeps {
   readonly investigate: (alert: Alert) => Promise<unknown>;
-  readonly approvals: ApprovalStore;
+  readonly approvals: ApprovalQueue;
+  readonly incidents: IncidentRepository;
+  readonly audit: AuditLog;
   readonly approvalService: ApprovalService;
   readonly registry: Registry;
   readonly logger: Logger;
@@ -46,8 +51,11 @@ export function createHttpServer(deps: ServerDeps): Server {
   const routes = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const approvalMatch = /^\/approvals\/([0-9a-f-]{36})$/.exec(url.pathname);
+    const incidentMatch = /^\/incidents\/([0-9a-f-]{36})$/.exec(url.pathname);
 
-    if (req.method === 'GET' && url.pathname === '/healthz') return json(res, 200, { status: 'ok' });
+    if (req.method === 'GET' && url.pathname === '/healthz') {
+      return json(res, 200, { status: 'ok', uptimeSeconds: Math.round(process.uptime()) });
+    }
 
     if (req.method === 'GET' && url.pathname === '/metrics') {
       res.writeHead(200, { 'Content-Type': deps.registry.contentType });
@@ -67,10 +75,11 @@ export function createHttpServer(deps: ServerDeps): Server {
 
     if (req.method === 'GET' && url.pathname === '/approvals') {
       requireBearer(req, deps.approvalToken);
+      const pending = await deps.approvals.list();
       return json(
         res,
         200,
-        deps.approvals.list().map((approval) => ({
+        pending.map((approval) => ({
           id: approval.id,
           incidentId: approval.incidentId,
           service: approval.gateInput.service,
@@ -91,6 +100,30 @@ export function createHttpServer(deps: ServerDeps): Server {
       );
       const status = { executed: 200, rejected: 200, blocked: 409, not_found: 404, expired: 410 }[outcome.status];
       return json(res, status, outcome);
+    }
+
+    // Leituras operacionais usam a mesma credencial de quem aprova: quem decide precisa ver o contexto.
+    if (req.method === 'GET' && url.pathname === '/incidents') {
+      requireBearer(req, deps.approvalToken);
+      return json(res, 200, await deps.incidents.list(50));
+    }
+
+    if (req.method === 'GET' && incidentMatch?.[1]) {
+      requireBearer(req, deps.approvalToken);
+      const report = await deps.incidents.get(incidentMatch[1]);
+      if (!report) throw new HttpError(404, 'Incidente não encontrado.');
+      return json(res, 200, report);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/audit/verify') {
+      requireBearer(req, deps.approvalToken);
+      const records = await deps.audit.records();
+      const tail = records.at(-1);
+      return json(res, 200, {
+        ...verifyChain(records),
+        records: records.length,
+        head: tail ? { seq: tail.seq, event: tail.event, hash: tail.hash, prevHash: tail.prevHash } : null,
+      });
     }
 
     throw new HttpError(404, 'Rota não encontrada.');

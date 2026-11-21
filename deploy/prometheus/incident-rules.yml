@@ -1,0 +1,62 @@
+# Variante de synthetic-rules.yml com os três serviços parados no estado de incidente (usada por
+# docker-compose.evidencia.yml). Mesmos nomes de séries; valores coerentes com config/scripted-llm.yaml:
+#   saas-multitenant     um tenant domina a exportação de relatórios (noisy_tenant)
+#   payments-events-go   DLQ cheia com a ledger-api já de volta (downstream_recovered)
+#   kafka-telemetry      lag concentrado numa partição (poison_record)
+groups:
+  - name: incident-payments-events-go
+    rules:
+      - record: payments_dlq_messages
+        expr: vector(1500)
+        labels: { service: payments-events-go, queue: payments.events.dlq }
+      - record: payments_consumer_error_ratio
+        expr: vector(0.01)
+        labels: { service: payments-events-go }
+      - record: payments_downstream_up
+        expr: vector(1)
+        labels: { service: payments-events-go, dependency: ledger-api }
+
+  - name: incident-kafka-telemetry
+    rules:
+      - record: kafka_consumergroup_lag
+        expr: vector(11000)
+        labels: { service: kafka-telemetry, consumergroup: greenhouse-readings-enricher, topic: greenhouse.readings.v1, partition: '0' }
+      - record: kafka_consumergroup_lag
+        expr: vector(40)
+        labels: { service: kafka-telemetry, consumergroup: greenhouse-readings-enricher, topic: greenhouse.readings.v1, partition: '1' }
+      - record: kafka_consumergroup_lag
+        expr: vector(60)
+        labels: { service: kafka-telemetry, consumergroup: greenhouse-readings-enricher, topic: greenhouse.readings.v1, partition: '2' }
+      - record: kafka_telemetry_produced_per_second
+        expr: vector(1000)
+        labels: { service: kafka-telemetry }
+      - record: kafka_telemetry_consumed_per_second
+        expr: vector(990)
+        labels: { service: kafka-telemetry }
+      - record: kafka_telemetry_consumer_replicas
+        expr: vector(4)
+        labels: { service: kafka-telemetry }
+
+  - name: incident-saas-multitenant
+    rules:
+      - record: saas:http_request_duration_seconds:p99
+        expr: vector(2.7)
+        labels: { service: saas-multitenant, route: /api/v1/reports/export }
+      - record: saas:http_request_duration_seconds:p99
+        expr: vector(0.9)
+        labels: { service: saas-multitenant, route: /api/v1/bookings }
+      - record: saas_http_requests_per_second
+        expr: vector(205)
+        labels: { service: saas-multitenant, tenant: estudio-lotus }
+      - record: saas_http_requests_per_second
+        expr: vector(14)
+        labels: { service: saas-multitenant, tenant: estudio-sol }
+      - record: saas_http_requests_per_second
+        expr: vector(11)
+        labels: { service: saas-multitenant, tenant: estudio-bambu }
+      - record: saas_db_pool_in_use_ratio
+        expr: vector(0.7)
+        labels: { service: saas-multitenant }
+      - record: saas_api_cpu_utilization_ratio
+        expr: vector(0.55)
+        labels: { service: saas-multitenant }
