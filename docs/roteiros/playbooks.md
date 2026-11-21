@@ -31,7 +31,7 @@ Validação em três momentos: CI (`pnpm validate:playbooks`), subida do serviç
 | Playbook | Hipóteses | Ação por hipótese |
 | --- | --- | --- |
 | `payments-dlq-backlog` | dependência fora · dependência voltou · mensagem envenenada · consumidor saturado | só `downstream_recovered` libera `replay_dlq_batch`; saturação libera `scale_deployment`; o resto avisa o plantão |
-| `telemetry-consumer-lag` | falta de réplicas · destino lento · registro envenenado · consumidor travado | `scale_deployment` só para falta de réplicas; `restart_pods` para travado; `reset_consumer_offsets` (só sugestão) para envenenado |
+| `telemetry-consumer-lag` | falta de réplicas · destino lento · registro envenenado · consumidor travado | `scale_deployment` só para falta de réplicas; `restart_pods` para travado; `reset_consumer_offsets` para envenenado (fora da allowlist do serviço: o gate bloqueia e o plantão decide) |
 | `saas-p99-latency` | tenant barulhento · consulta lenta · CPU saturada | desligar `reports.heavy_export` só para tenant barulhento; escalar só para CPU |
 
 A orientação codifica armadilhas reais. Exemplos: escalar o consumidor quando o destino está lento piora a pressão; escalar a API quando o pool do banco está saturado também piora; reprocessar a DLQ com a dependência ainda fora devolve tudo para a DLQ.

@@ -116,7 +116,7 @@ cases:
     traces:
       slow_enrichment:
         - { traceId: k2, rootOperation: enrich_reading, durationMs: 90, spanCount: 3, errorSpans: 3, slowestOperation: { name: schema.decode, durationMs: 60 } }
-    expected: { hypothesisId: poison_record, actionId: reset_consumer_offsets, outcome: suggested }
+    expected: { hypothesisId: poison_record, actionId: reset_consumer_offsets, outcome: blocked }
 
   - id: telemetry-slow-sink
     description: A base de séries temporais está lenta; escalar o consumidor só aumentaria a pressão.
