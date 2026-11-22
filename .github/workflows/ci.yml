@@ -56,6 +56,46 @@ jobs:
       - name: Build
         run: pnpm build
 
+  web:
+    name: painel (lint, typecheck, testes e build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
+      - name: Instalar Node (versão do .nvmrc)
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Testes
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
   docker:
     name: compose e imagem
     runs-on: ubuntu-latest
@@ -82,3 +122,6 @@ jobs:
 
       - name: Build da imagem
         run: docker build -t ops-copilot:ci .
+
+      - name: Build da imagem do painel
+        run: docker build -t ops-copilot-web:ci web

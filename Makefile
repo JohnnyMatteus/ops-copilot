@@ -2,8 +2,10 @@
 COMPOSE := docker compose
 PROFILES := --profile core --profile observability
 SCENARIO ?= saas
+# O painel mostra o commit da política e dos playbooks carregados.
+export GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo desconhecido)
 
-.PHONY: help network up up-portfolio down logs ps seed audit dev test test-integration lint eval build clean
+.PHONY: help network up up-portfolio down logs ps seed audit dev web-dev web-test test test-integration lint eval build clean
 
 help: ## Lista os alvos
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-17s %s\n", $$1, $$2}'
@@ -34,6 +36,12 @@ audit: ## Lista os objetos (e versões) da trilha de auditoria no MinIO
 
 dev: ## Roda o copiloto no host com recarga (usa .env)
 	pnpm dev
+
+web-dev: ## Roda o painel Vigília com Vite (proxy /api para o copiloto em localhost:8080)
+	cd web && pnpm install && pnpm dev
+
+web-test: ## Lint, typecheck, testes e build do painel
+	cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 
 test: ## Lint, typecheck, testes unitários e evals com modelo falso
 	pnpm lint && pnpm typecheck && pnpm test && pnpm eval

@@ -3,7 +3,7 @@ import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig(
-  { ignores: ['node_modules/', 'dist/', 'coverage/', 'var/', 'evals/reports/', 'e2e/**/node_modules/', 'e2e/**/test-results/'] },
+  { ignores: ['node_modules/', 'dist/', 'coverage/', 'var/', 'evals/reports/', 'e2e/**/node_modules/', 'web/', 'e2e/**/test-results/'] },
   js.configs.recommended,
   tseslint.configs.recommended,
   {

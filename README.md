@@ -103,6 +103,35 @@ pnpm eval --model real # evals com o LLM do .env (manual; custa tokens)
 - `tests/graph/investigation.test.ts` roda o grafo de ponta a ponta, incluindo injeção de prompt no alerta, falha de schema, falha do executor e spans OpenTelemetry.
 - Os testes de integração provam, no MinIO real, que a trilha de auditoria não pode ser sobrescrita nem apagada.
 
+## Interface
+
+O painel **Vigília** (`web/`, Vue 3 + Vuetify 3 + TanStack Query) é o caderno de bordo do plantão: tema escuro por padrão, rail de 48 px, atalhos de teclado e paleta de comandos `⌘K`. O âmbar aparece só onde uma pessoa precisa decidir. O elemento-assinatura é a **fita do gate**: cada incidente é uma fita com as cinco etapas, e na etapa `decide` o carimbo lista as checagens passadas (✓) e falhadas (✕) do gate. A trilha de auditoria mostra os **elos de hash**.
+
+![Incidentes](docs/screenshots/incidentes.png)
+![Investigação com a fita do gate](docs/screenshots/investigacao.png)
+![Fila de aprovações](docs/screenshots/aprovacoes.png)
+![Trilha de auditoria](docs/screenshots/auditoria.png)
+![Limites de autonomia](docs/screenshots/politica.png)
+
+| Tela | O que mostra |
+| --- | --- |
+| Incidentes | Serviços monitorados, lista com etapa, veredicto e estado; pendentes sobem com contagem regressiva |
+| Investigação | Fita do gate, hipótese, evidências (PromQL, sparklines, traces, fontes com erro) e a decisão humana |
+| Aprovações | Fila com prazo, por que precisa de humano e o que acontece se vencer; aprovar, recusar com motivo, cancelar |
+| Auditoria | Registros com ator, evento e elo de hash; botão "verificar cadeia" |
+| Política, playbooks | Matriz serviço × ação com limites de parâmetros, arquivo de origem e commit (só leitura) |
+| Orçamento | Saldo de ações automáticas por serviço e consumo do LLM |
+
+Como rodar:
+
+```bash
+make up                 # sobe tudo, inclusive o painel em http://localhost:8088 (WEB_PORT)
+make web-dev            # só o painel, com Vite em http://localhost:5173 (proxy /api para localhost:8080)
+make web-test           # lint, typecheck, testes e build do painel
+```
+
+Entre com o token de operador do `.env` (`dev-only-operador-plantao`, em `OPERATOR_TOKENS`) ou, se o copiloto tiver `OIDC_ISSUER_URL`, com OIDC (ADR 0012).
+
 ## Decisões principais
 
 | ADR | Decisão |
@@ -134,13 +163,14 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 - **Previsibilidade em vez de flexibilidade:** etapas fixas e uma chamada ao LLM por incidente. O copiloto não "explora" livremente; incidentes sem playbook vão direto para humanos.
 - **Playbook obrigatório:** cobertura cresce na velocidade com que os times escrevem playbooks. Em troca, toda ação tem dono, versão e revisão.
 - **Estado operacional no Redis (ADR 0011):** orçamento, aprovações e incidentes sobrevivem a restart e valem para várias réplicas, ao custo de mais uma dependência. Sem Redis, o gate falha fechado.
+- **Painel sem tempo real por push:** o painel reconsulta a API a cada 5 s (TanStack Query) em vez de manter WebSocket: mais simples e suficiente para a escala do plantão.
 - **Dry-run apenas:** a fundação prova as decisões, não a execução. Ligar o modo live exige adaptadores reais.
 - **Resumo de sinais, não dados brutos:** o prompt tem tamanho limitado e custo previsível, mas o modelo vê estatísticas e não a série completa.
 
 ## Próximos passos
 
 - Adaptadores reais do executor (Kubernetes para `scale_deployment`/`restart_pods`, serviço de feature flags, fila da DLQ) e ações inversas automáticas para rollback.
-- Aprovação via ChatOps (Slack/Teams) e autenticação pelo Keycloak do `platform-edge`, no lugar do token compartilhado.
+- Aprovação via ChatOps (Slack/Teams), papéis separados (leitor e aprovador) e um teto de custo de LLM por incidente.
 - RAG sobre runbooks em Markdown para enriquecer a orientação dos playbooks.
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).
 - Detecção preditiva com PromQL (`predict_linear`) para abrir investigação antes do alerta.
