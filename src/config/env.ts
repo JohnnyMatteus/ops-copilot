@@ -1,5 +1,6 @@
 // Configuração por variáveis de ambiente, validada na subida. Erro cita a variável, nunca o valor.
 import { z } from 'zod';
+import { parseSlackUsers } from '../chatops/users.js';
 import { parseOperatorTokens } from '../auth/operator.js';
 import { ExecutionModeSchema } from '../executor/executor.js';
 
@@ -54,6 +55,12 @@ export const EnvSchema = z
     FEATURE_FLAGS_TOKEN: token.optional(),
     /** Redis onde vivem as filas de DLQ; separado do Redis de estado do copiloto. */
     DLQ_REDIS_URL: z.url().optional(),
+    /** ChatOps no Slack (ADR 0019). Sem SLACK_SIGNING_SECRET a rota de interações fica desligada. */
+    SLACK_SIGNING_SECRET: token.optional(),
+    SLACK_USERS: z.string().optional(),
+    SLACK_BOT_TOKEN: z.string().min(16).optional(),
+    SLACK_APPROVAL_CHANNEL: z.string().min(1).optional(),
+    SLACK_API_URL: z.url().default('https://slack.com/api'),
     /** Validade do lease de uma investigação, renovado por heartbeat enquanto ela roda (ADR 0018). */
     INVESTIGATION_LEASE_SECONDS: z.coerce.number().int().min(5).max(600).default(30),
     APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(30),
@@ -79,6 +86,19 @@ export const EnvSchema = z
   .superRefine((env, ctx) => {
     requireOpenRouterKey(env, ctx);
     if (env.EXECUTION_MODE === 'live') requireLiveConfig(env, ctx);
+    if (env.SLACK_SIGNING_SECRET && !env.SLACK_USERS) {
+      ctx.addIssue({ code: 'custom', path: ['SLACK_USERS'], message: 'obrigatória com SLACK_SIGNING_SECRET: sem mapa de usuários ninguém decide' });
+    }
+    if (env.SLACK_USERS) {
+      try {
+        parseSlackUsers(env.SLACK_USERS);
+      } catch (error) {
+        ctx.addIssue({ code: 'custom', path: ['SLACK_USERS'], message: (error as Error).message });
+      }
+    }
+    if (env.SLACK_BOT_TOKEN && !env.SLACK_APPROVAL_CHANNEL) {
+      ctx.addIssue({ code: 'custom', path: ['SLACK_APPROVAL_CHANNEL'], message: 'obrigatória com SLACK_BOT_TOKEN' });
+    }
     if (!env.OPERATOR_TOKENS && !env.OIDC_ISSUER_URL) {
       ctx.addIssue({ code: 'custom', path: ['OPERATOR_TOKENS'], message: 'defina OPERATOR_TOKENS ou OIDC_ISSUER_URL' });
     }

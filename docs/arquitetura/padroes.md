@@ -10,6 +10,8 @@ O domínio (gate, grafo, casos de uso) depende de interfaces. Os adaptadores con
 | --- | --- |
 | [`LlmClient`](../../src/llm/client.ts#L23) | OpenAI compatível (Ollama, OpenRouter), [`ScriptedLlmClient`](../../src/llm/scripted.ts#L12), `FakeLlmClient` (testes) |
 | [`MetricsSource` / `TraceSource`](../../src/signals/types.ts#L36) | Prometheus, Jaeger, fixtures |
+| [`ApprovalAnnouncer` / `NotifierPort`](../../src/chatops/slack-client.ts) | `SlackClient` |
+| [`ReplayGuard`](../../src/chatops/signature.ts) | Redis (`SET NX`), em memória |
 | [`RunbookRetriever`](../../src/rag/runbooks.ts) | MiniSearch (BM25) em memória |
 | [`ObjectStore`](../../src/storage/object-store.ts#L3) | S3/MinIO, em memória |
 | [`AuditLog`](../../src/autonomy/audit.ts#L40) | S3 com object lock, arquivo JSONL, em memória |

@@ -10,7 +10,7 @@ export type Role = 'reader' | 'approver';
 export interface Operator {
   readonly email: string;
   readonly name: string;
-  readonly via: 'token' | 'oidc';
+  readonly via: 'token' | 'oidc' | 'slack';
   readonly role: Role;
 }
 

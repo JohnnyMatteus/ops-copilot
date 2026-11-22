@@ -169,9 +169,9 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 
 ## Próximos passos
 
-- `notify_oncall` em modo live ainda não tem adaptador de notificação (falha explícita).
+- ChatOps no Slack (ADR 0019) e `notify_oncall` em modo live só foram testados contra dublês, com payloads de exemplo e o vetor de assinatura da documentação do Slack; não foram exercitados contra um workspace real.
 - Exercitar o executor real contra um cluster, um serviço de flags e uma DLQ de verdade.
-- Aprovação via ChatOps (Slack/Teams).
+- Aprovação por Teams (hoje só Slack).
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).
 - Detecção preditiva com PromQL (`predict_linear`) para abrir investigação antes do alerta.
 - Exercitar a retomada de investigações contra um Redis real (hoje testada com dublê).

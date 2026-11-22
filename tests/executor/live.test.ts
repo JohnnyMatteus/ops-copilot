@@ -117,6 +117,15 @@ describe('LiveExecutor', () => {
     expect((await executor.execute({ id: 'reset_consumer_offsets', params: {}, reversible: false }, ctx)).status).toBe('failed');
   });
 
+  it('notify_oncall avisa o canal pelo notificador e falha sem ele', async () => {
+    const sent: [string, string][] = [];
+    const executor = new LiveExecutor(allowlist, { notifier: { notify: async (channel, text) => void sent.push([channel, text]) } });
+    const result = await executor.execute({ id: 'notify_oncall', params: { channel: '#plantao-agendamento' }, reversible: true }, ctx);
+    expect(result.status).toBe('executed');
+    expect(sent[0]?.[0]).toBe('#plantao-agendamento');
+    expect(sent[0]?.[1]).toContain('inc-1');
+  });
+
   it('flag: desliga, guarda como religar e é idempotente', async () => {
     const flags = new FakeFlags();
     const executor = new LiveExecutor(allowlist, { featureFlags: flags });

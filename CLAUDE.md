@@ -43,6 +43,7 @@ src/
   graph/       estado, etapas do LangGraph (triage, collect, diagnose, decide, act) e checkpointer Redis
   incident/    investigador, prompt, schema do diagnóstico, aprovações
   executor/    porta, dry-run, executor real, allowlist de alvos e adaptadores (Kubernetes, flags, DLQ)
+  chatops/     Slack: assinatura verificada, anti-replay, mapa de usuários e papéis, botões de aprovação
   rag/         recuperação lexical de runbooks Markdown (só informa o diagnóstico, sem autoridade)
   storage/     porta de objetos e adaptador S3 (MinIO/AWS)
   telemetry/   OpenTelemetry, métricas, logs, decorador do LLM

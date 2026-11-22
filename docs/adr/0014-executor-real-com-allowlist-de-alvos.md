@@ -15,7 +15,7 @@ O ADR 0006 deixou o modo live para depois dos adaptadores reais. Agora existem a
 - Além do gate, o executor confere o alvo contra `config/executor-targets.yaml`: serviço → namespace e deployments, flags e DLQs (com a fila de destino). Tudo que não está listado é recusado; namespaces de sistema são rejeitados pelo schema.
 - Escala usa JSON Patch com `test` do valor lido: se outra pessoa mudou as réplicas no meio, o servidor recusa. O teto `maxReplicas` do catálogo é aplicado no executor.
 - Backend ausente vira falha explícita (`failed`), nunca sucesso simulado.
-- `notify_oncall` em live falha de forma explícita ("não implementado") até existir um adaptador de notificação; nada é simulado.
+- `notify_oncall` em live usa o cliente do Slack (ADR 0019) quando `SLACK_BOT_TOKEN` está configurado; sem ele, falha de forma explícita ("não implementado"). Nada é simulado.
 - `scale_deployment` recusa deployment em 0 réplicas (parado de propósito) e resposta sem `spec.replicas` é erro, nunca zero.
 - `ExecutionResult.undo` guarda a ação inversa com o estado anterior (ADR 0015).
 

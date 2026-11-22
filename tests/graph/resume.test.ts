@@ -87,8 +87,8 @@ describe('retomada com checkpoints', () => {
       execute: async (action) => ({ status: 'executed', actionId: action.id, detail: `execução ${String(++executions)}` }),
     };
     const inner = new FakeLlmClient([noisyTenant]);
-    // Dura bem mais que o lease (60 ms): só o heartbeat o mantém vivo.
-    const slow: LlmClient = { chat: async (request) => (await new Promise((resolve) => setTimeout(resolve, 400)), inner.chat(request)) };
+    // Dura bem mais que o lease (300 ms): só o heartbeat o mantém vivo.
+    const slow: LlmClient = { chat: async (request) => (await new Promise((resolve) => setTimeout(resolve, 900)), inner.chat(request)) };
     const setup = await testDeps({
       llm: slow,
       metricsSource: new FixtureMetricsSource(saasNoisyTenantMetrics),
@@ -96,14 +96,16 @@ describe('retomada com checkpoints', () => {
       executor,
     });
     const shared = { ...setup.deps, checkpointer, journal, effects };
-    const live = new Investigator(shared, { leaseMs: 60 });
+    const live = new Investigator(shared, { leaseMs: 300 });
     const sameProcessTimer = live;
-    const otherProcessTimer = new Investigator(shared, { leaseMs: 60 });
+    const otherProcessTimer = new Investigator(shared, { leaseMs: 300 });
 
-    const running = live.investigate(saasAlert);
+    let done = false;
+    const running = live.investigate(saasAlert).finally(() => (done = true));
     const resumed: unknown[] = [];
-    for (let tick = 0; tick < 24; tick++) {
+    while (!done) {
       await new Promise((resolve) => setTimeout(resolve, 20));
+      if (done) break;
       resumed.push(...(await sameProcessTimer.resumeInterrupted()), ...(await otherProcessTimer.resumeInterrupted()));
     }
     const report = await running;
