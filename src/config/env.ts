@@ -34,6 +34,8 @@ export const EnvSchema = z
     PROMETHEUS_URL: z.url().default('http://localhost:9090'),
     JAEGER_URL: z.url().default('http://localhost:16686'),
     PLAYBOOKS_DIR: z.string().min(1).default('playbooks'),
+    /** Runbooks Markdown usados como referência no diagnóstico; vazio desliga o RAG. */
+    RUNBOOKS_DIR: z.string().default('runbooks'),
     AUTONOMY_POLICY_FILE: z.string().min(1).default('config/autonomy-policy.yaml'),
     AUDIT_SINK: z.enum(['file', 's3']).default('file'),
     AUDIT_LOG_PATH: z.string().min(1).default('var/audit.jsonl'),

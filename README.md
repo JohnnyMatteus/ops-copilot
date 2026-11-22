@@ -172,7 +172,6 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 - `notify_oncall` em modo live ainda não tem adaptador de notificação (falha explícita).
 - Exercitar o executor real contra um cluster, um serviço de flags e uma DLQ de verdade.
 - Aprovação via ChatOps (Slack/Teams).
-- RAG sobre runbooks em Markdown para enriquecer a orientação dos playbooks.
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).
 - Detecção preditiva com PromQL (`predict_linear`) para abrir investigação antes do alerta.
 - Checkpoints do LangGraph para retomar investigações interrompidas.

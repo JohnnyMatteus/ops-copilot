@@ -22,6 +22,7 @@ COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
 COPY --chown=node:node playbooks ./playbooks
 COPY --chown=node:node config ./config
+COPY --chown=node:node runbooks ./runbooks
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 --start-period=90s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1

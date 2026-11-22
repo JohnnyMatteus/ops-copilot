@@ -14,6 +14,12 @@ export function createDiagnoseNode(deps: InvestigationDeps) {
     if (!playbook) throw new Error('diagnose: estado sem playbook.');
     const available = signals.filter((signal) => signal.kind !== 'error').map((signal) => signal.name);
 
+    const passages =
+      deps.runbooks?.search({
+        playbookId: playbook.metadata.id,
+        query: [alert.alertname, ...Object.values(alert.annotations), ...signals.map((signal) => signal.name)].join(' '),
+        limit: 3,
+      }) ?? [];
     let spent = EMPTY_USAGE;
     const client =
       deps.maxLlmCostUsdPerIncident === undefined ? deps.llm : new CostCappedLlmClient(deps.llm, deps.maxLlmCostUsdPerIncident);
@@ -24,7 +30,7 @@ export function createDiagnoseNode(deps: InvestigationDeps) {
           spent = addUsage(spent, response);
         },
         model: deps.model,
-        messages: buildDiagnosisMessages(alert, playbook, signals),
+        messages: buildDiagnosisMessages(alert, playbook, signals, passages),
         schema: diagnosisSchemaFor(playbook, available),
       });
       deps.metrics.llmCalls.inc({ model: deps.model, result: 'valid' });
@@ -38,6 +44,7 @@ export function createDiagnoseNode(deps: InvestigationDeps) {
           confidence: value.confidence,
           proposedAction: value.proposedAction?.actionId ?? null,
           llmCalls: usage.calls,
+          runbooks: passages.map((passage) => passage.id),
         },
       });
       return { diagnosis: value, llmUsage: usage };
