@@ -19,6 +19,8 @@ export const OutcomeSchema = z.enum([
   'awaiting_approval',
   'auto_executed',
   'execution_failed',
+  /** Interrompida por queda do processo em etapa que não pode ser repetida sem risco. */
+  'interrupted',
 ]);
 export type Outcome = z.infer<typeof OutcomeSchema>;
 

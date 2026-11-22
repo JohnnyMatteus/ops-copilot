@@ -1,6 +1,6 @@
 // Grafo de investigação com etapas fixas (ADR 0001). Cada etapa pode encerrar o fluxo
 // preenchendo `outcome`; as arestas condicionais só olham esse campo.
-import { END, START, StateGraph } from '@langchain/langgraph';
+import { END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
 import { withSpan } from '../telemetry/tracing.js';
 import type { InvestigationDeps } from './deps.js';
 import { createActNode } from './nodes/act.js';
@@ -50,7 +50,7 @@ export function buildInvestigationGraph(deps: InvestigationDeps) {
     .addConditionalEdges('diagnose', continueUnlessFinished('decide'), ['decide', END])
     .addConditionalEdges('decide', continueUnlessFinished('act'), ['act', END])
     .addEdge('act', END)
-    .compile();
+    .compile({ checkpointer: deps.checkpointer ?? new MemorySaver() });
 }
 
 export type InvestigationGraph = ReturnType<typeof buildInvestigationGraph>;

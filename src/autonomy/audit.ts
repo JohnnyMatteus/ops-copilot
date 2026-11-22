@@ -20,6 +20,8 @@ export const AuditEventSchema = z.enum([
   'approval_granted',
   'approval_rejected',
   'incident_cancelled',
+  'investigation_resumed',
+  'investigation_interrupted',
   'rollback_granted',
   'rollback_executed',
   'rollback_dry_run',

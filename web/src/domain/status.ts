@@ -33,6 +33,7 @@ export function statusOf(incident: Incident, now: number): IncidentStatus {
     insufficient_signals: 'failed',
     diagnosis_failed: 'failed',
     execution_failed: 'failed',
+    interrupted: 'failed',
   };
   return byOutcome[incident.outcome];
 }
@@ -61,6 +62,7 @@ export const OUTCOME_LABEL: Record<Outcome, string> = {
   awaiting_approval: 'aguardando aprovação',
   auto_executed: 'executado em dry-run',
   execution_failed: 'falha na execução',
+  interrupted: 'investigação interrompida',
 };
 
 /** Estados em que ainda há uma pessoa para decidir. */

@@ -12,9 +12,12 @@ import { ApprovalService } from './incident/approval-service.js';
 import { InMemoryApprovalQueue, type ApprovalQueue } from './incident/approvals.js';
 import { InMemoryIncidentRepository, type IncidentRepository } from './incident/incidents.js';
 import { RollbackService } from './incident/rollback-service.js';
+import { MemorySaver, type BaseCheckpointSaver } from '@langchain/langgraph';
 import { Investigator } from './incident/investigator.js';
 import { RedisApprovalQueue } from './incident/redis-approvals.js';
 import { RedisIncidentRepository } from './incident/redis-incidents.js';
+import { RedisCheckpointSaver } from './graph/redis-checkpointer.js';
+import { InMemoryInvestigationJournal, RedisInvestigationJournal, type InvestigationJournal } from './incident/journal.js';
 import { createLlmClient } from './llm/factory.js';
 import { loadRunbooks } from './rag/runbooks.js';
 import { loadPlaybooks } from './playbooks/registry.js';
@@ -48,6 +51,8 @@ export async function createApp(env: Env, logger: Logger) {
   const investigator = new Investigator({
     playbooks,
     runbooks,
+    checkpointer: state.checkpointer,
+    journal: state.journal,
     metricsSource: new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL }),
     traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
     llm,
@@ -95,6 +100,18 @@ export async function createApp(env: Env, logger: Logger) {
     webhookToken: env.WEBHOOK_TOKEN,
   });
 
+  const resumeAfterMs = env.INVESTIGATION_RESUME_AFTER_SECONDS * 1000;
+  const resume = () =>
+    investigator
+      .resumeInterrupted(resumeAfterMs)
+      .then((reports) => {
+        if (reports.length > 0) logger.info({ resumed: reports.map((r) => [r.incidentId, r.outcome]) }, 'investigações retomadas');
+      })
+      .catch((error: unknown) => logger.error({ err: error }, 'falha ao retomar investigações'));
+  void resume();
+  const resumeTimer = setInterval(() => void resume(), 60_000);
+  resumeTimer.unref();
+
   logger.info(
     {
       runbooks: runbooks?.size ?? 0,
@@ -110,6 +127,7 @@ export async function createApp(env: Env, logger: Logger) {
   return {
     server,
     shutdown: async () => {
+      clearInterval(resumeTimer);
       await tracing.shutdown();
       await closeExecutor();
       await state.close();
@@ -121,6 +139,8 @@ interface StateAdapters {
   readonly budget: ActionBudget;
   readonly approvals: ApprovalQueue;
   readonly incidents: IncidentRepository;
+  readonly checkpointer: BaseCheckpointSaver;
+  readonly journal: InvestigationJournal;
   close(): Promise<void>;
 }
 
@@ -132,6 +152,8 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
       budget: new InMemoryActionBudget(),
       approvals: new InMemoryApprovalQueue({ ttlMs }),
       incidents: new InMemoryIncidentRepository(),
+      checkpointer: new MemorySaver(),
+      journal: new InMemoryInvestigationJournal(),
       close: async () => undefined,
     };
   }
@@ -140,6 +162,8 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
     budget: new RedisActionBudget(redis),
     approvals: new RedisApprovalQueue(redis, { ttlMs }),
     incidents: new RedisIncidentRepository(redis),
+    checkpointer: new RedisCheckpointSaver(redis),
+    journal: new RedisInvestigationJournal(redis),
     close: async () => {
       await redis.quit();
     },

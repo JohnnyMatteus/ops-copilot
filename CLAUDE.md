@@ -40,7 +40,7 @@ src/
   autonomy/    níveis, catálogo, política, orçamento, gate, auditoria
   llm/         porta, adaptador compatível com OpenAI, fake, saída estruturada
   signals/     Prometheus, Jaeger, resumo para o prompt, fontes fixas
-  graph/       estado e etapas do LangGraph (triage, collect, diagnose, decide, act)
+  graph/       estado, etapas do LangGraph (triage, collect, diagnose, decide, act) e checkpointer Redis
   incident/    investigador, prompt, schema do diagnóstico, aprovações
   executor/    porta, dry-run, executor real, allowlist de alvos e adaptadores (Kubernetes, flags, DLQ)
   rag/         recuperação lexical de runbooks Markdown (só informa o diagnóstico, sem autoridade)

@@ -174,4 +174,4 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 - Aprovação via ChatOps (Slack/Teams).
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).
 - Detecção preditiva com PromQL (`predict_linear`) para abrir investigação antes do alerta.
-- Checkpoints do LangGraph para retomar investigações interrompidas.
+- Exercitar a retomada de investigações contra um Redis real (hoje testada com dublê).
