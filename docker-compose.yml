@@ -41,7 +41,8 @@ services:
       AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
       S3_ENDPOINT: http://localstack:4566
       AWS_REGION: us-east-1
-      # O LocalStack aceita qualquer credencial; na AWS de verdade use um usuário só de anexar e ler.
+      # No local o copiloto NÃO tem credencial restrita: o LocalStack community não aplica IAM e aceita qualquer
+      # credencial (ADR 0021). Na AWS de verdade use um usuário só de anexar e ler (sem DeleteObject).
       AWS_ACCESS_KEY_ID: ${AUDIT_WRITER_ACCESS_KEY:-audit-writer}
       AWS_SECRET_ACCESS_KEY: ${AUDIT_WRITER_SECRET_KEY:-dev-only-audit-writer-change-me}
       REDIS_URL: redis://redis:6379
