@@ -12,7 +12,7 @@ Copiloto de operações (AI-Ops) que investiga alertas de `payments-events-go`, 
 2. Ação nova no catálogo exige: schema estrito de parâmetros com limites, classificação de reversibilidade, teto de autonomia e teste provando o bloqueio fora do limite.
 3. Toda saída do LLM passa por schema Zod via `generateStructured` (um retry, depois erro explícito).
 4. Nenhum teste chama LLM real nem serviço externo da internet. Use `FakeLlmClient` e `Fixture*Source`. Os testes de integração só falam com o docker-compose local.
-5. O executor é dry-run. Não implemente efeito real sem ADR.
+5. O executor é dry-run por padrão; o modo live (ADR 0014) exige configuração explícita e a allowlist de alvos. Nunca use kubeconfig, cluster ou contexto da máquina em testes.
 6. Domínio 100% fictício; e-mails só `@example.com`; segredos só em variável de ambiente (valores `dev-only-*` no compose e no `.env.example`).
 7. Docs em português do Brasil; identificadores de código em inglês.
 8. Commits em Conventional Commits, com `git commit -F <arquivo>`.
@@ -42,13 +42,13 @@ src/
   signals/     Prometheus, Jaeger, resumo para o prompt, fontes fixas
   graph/       estado e etapas do LangGraph (triage, collect, diagnose, decide, act)
   incident/    investigador, prompt, schema do diagnóstico, aprovações
-  executor/    porta e dry-run
+  executor/    porta, dry-run, executor real, allowlist de alvos e adaptadores (Kubernetes, flags, DLQ)
   storage/     porta de objetos e adaptador S3 (MinIO/AWS)
   telemetry/   OpenTelemetry, métricas, logs, decorador do LLM
   http/        webhook, aprovações, /metrics, /healthz
   app.ts       raiz de composição; main.ts sobe o serviço
 playbooks/     um YAML por alerta
-config/        autonomy-policy.yaml
+config/        autonomy-policy.yaml, executor-targets.yaml
 evals/         dataset, respostas do modelo falso, harness e CLI
 deploy/        Prometheus (métricas sintéticas e alertas), Alertmanager, MinIO, gerador de traces
 tests/         unitários por módulo; tests/integration contra o compose

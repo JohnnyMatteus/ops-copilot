@@ -6,7 +6,7 @@ import { AutonomyGate } from './autonomy/gate.js';
 import { RedisActionBudget } from './autonomy/redis-budget.js';
 import { loadAutonomyPolicy } from './autonomy/policy.js';
 import type { Env } from './config/env.js';
-import { createExecutor } from './executor/executor.js';
+import { createExecutor } from './executor/factory.js';
 import { createHttpServer } from './http/server.js';
 import { ApprovalService } from './incident/approval-service.js';
 import { InMemoryApprovalQueue, type ApprovalQueue } from './incident/approvals.js';
@@ -37,7 +37,7 @@ export async function createApp(env: Env, logger: Logger) {
   const audit = createAuditLog(env);
   const state = await createStateAdapters(env, logger);
   const gate = new AutonomyGate(policy, state.budget);
-  const executor = createExecutor(env.EXECUTION_MODE);
+  const { executor, close: closeExecutor } = await createExecutor(env);
   const { approvals, incidents } = state;
   metrics.observePendingApprovals(async () => (await approvals.list()).length);
   const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
@@ -104,6 +104,7 @@ export async function createApp(env: Env, logger: Logger) {
     server,
     shutdown: async () => {
       await tracing.shutdown();
+      await closeExecutor();
       await state.close();
     },
   };

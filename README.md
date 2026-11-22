@@ -164,12 +164,12 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 - **Playbook obrigatório:** cobertura cresce na velocidade com que os times escrevem playbooks. Em troca, toda ação tem dono, versão e revisão.
 - **Estado operacional no Redis (ADR 0011):** orçamento, aprovações e incidentes sobrevivem a restart e valem para várias réplicas, ao custo de mais uma dependência. Sem Redis, o gate falha fechado.
 - **Painel sem tempo real por push:** o painel reconsulta a API a cada 5 s (TanStack Query) em vez de manter WebSocket: mais simples e suficiente para a escala do plantão.
-- **Dry-run apenas:** a fundação prova as decisões, não a execução. Ligar o modo live exige adaptadores reais.
+- **Dry-run por padrão:** o modo live (ADR 0014) existe, com allowlist de alvos, mas os adaptadores de Kubernetes, flags e DLQ só foram testados contra dublês e um emulador local da API; não foram exercitados contra cluster ou serviços reais.
 - **Resumo de sinais, não dados brutos:** o prompt tem tamanho limitado e custo previsível, mas o modelo vê estatísticas e não a série completa.
 
 ## Próximos passos
 
-- Adaptadores reais do executor (Kubernetes para `scale_deployment`/`restart_pods`, serviço de feature flags, fila da DLQ) e ações inversas automáticas para rollback.
+- Exercitar o executor real contra um cluster, um serviço de flags e uma DLQ de verdade.
 - Aprovação via ChatOps (Slack/Teams), papéis separados (leitor e aprovador) e um teto de custo de LLM por incidente.
 - RAG sobre runbooks em Markdown para enriquecer a orientação dos playbooks.
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).

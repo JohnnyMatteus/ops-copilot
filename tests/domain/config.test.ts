@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ConfigError, loadEnv } from '../../src/config/env.js';
-import { createExecutor, DryRunExecutor, ExecutorConfigError } from '../../src/executor/executor.js';
+import { DryRunExecutor } from '../../src/executor/executor.js';
+import { createExecutor } from '../../src/executor/factory.js';
 
 const base = { WEBHOOK_TOKEN: 'w'.repeat(16), OPERATOR_TOKENS: `plantao@example.com=${'a'.repeat(16)}` };
 
@@ -47,7 +48,7 @@ describe('configuração', () => {
 
 describe('executor', () => {
   it('dry-run é o padrão e descreve a ação sem executá-la', async () => {
-    const executor = createExecutor('dry-run');
+    const { executor } = await createExecutor(loadEnv(base));
     expect(executor).toBeInstanceOf(DryRunExecutor);
     const result = await executor.execute(
       { id: 'scale_deployment', params: { deployment: 'saas-api', replicasDelta: 1, maxReplicas: 10 }, reversible: true },
@@ -57,7 +58,10 @@ describe('executor', () => {
     expect(result.detail).toMatch(/^\[dry-run\] scale_deployment/);
   });
 
-  it('modo live sem adaptadores falha na subida em vez de degradar em silêncio', () => {
-    expect(() => createExecutor('live')).toThrow(ExecutorConfigError);
+  it('modo live exige allowlist de alvos e ao menos um backend, sem padrões implícitos', () => {
+    expect(() => loadEnv({ ...base, EXECUTION_MODE: 'live' })).toThrow(/EXECUTOR_TARGETS_FILE/);
+    expect(() => loadEnv({ ...base, EXECUTION_MODE: 'live', EXECUTOR_TARGETS_FILE: 'x.yaml' })).toThrow(/ao menos um backend/);
+    expect(() => loadEnv({ ...base, EXECUTION_MODE: 'live', EXECUTOR_TARGETS_FILE: 'x.yaml', KUBE_AUTH: 'kubeconfig' })).toThrow(/KUBE_CONTEXT/);
+    expect(loadEnv({ ...base, EXECUTION_MODE: 'live', EXECUTOR_TARGETS_FILE: 'x.yaml', KUBE_AUTH: 'in-cluster' }).EXECUTION_MODE).toBe('live');
   });
 });
