@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import type { Alert } from '../../src/domain/alert.js';
 import { Investigator } from '../../src/incident/investigator.js';
 import { FakeLlmClient } from '../../src/llm/fake.js';
+import { InMemoryReplayGuard } from '../../src/chatops/signature.js';
+import type { ActionExecutor } from '../../src/executor/executor.js';
 import { PredictiveDetector, type PredictionResult } from '../../src/predictive/detector.js';
 import { loadPredictiveRules, PredictiveRulesError, PredictiveRuleSchema, type PredictiveRule } from '../../src/predictive/rules.js';
 import { FixtureMetricsSource, FixtureTraceSource } from '../../src/signals/fixture.js';
@@ -29,22 +31,23 @@ const labels = { service: 'kafka-telemetry', consumergroup: 'greenhouse-readings
 
 /** Fonte controlável: o teste muda o previsto e o atual entre ciclos. */
 function controllable(initial: { predicted: number; current: number }) {
-  const state = { ...initial, failPredict: false };
+  const state = { ...initial, failPredict: false, noCurrent: false };
   const source: MetricsSource = {
     query: async (spec): Promise<MetricSeries[]> => {
       if (spec.name === rule.name) {
         if (state.failPredict) throw new Error('prometheus fora');
         return [series(labels, [state.predicted])];
       }
-      return [series(labels, [state.current])];
+      return state.noCurrent ? [] : [series(labels, [state.current])];
     },
   };
   return { state, source };
 }
 
-function harness(initial = { predicted: 14_000, current: 6_000 }, rules = [rule]) {
+function harness(initial = { predicted: 14_000, current: 6_000 }, rules = [rule], shared?: { cooldown: InMemoryReplayGuard; clock: { ms: number } }) {
   const control = controllable(initial);
-  let nowMs = Date.parse('2026-11-22T12:00:00Z');
+  const clock = shared?.clock ?? { ms: Date.parse('2026-11-22T12:00:00Z') };
+  const cooldown = shared?.cooldown ?? new InMemoryReplayGuard(() => clock.ms);
   const alerts: Alert[] = [];
   const results: PredictionResult[] = [];
   const errors: unknown[] = [];
@@ -52,11 +55,12 @@ function harness(initial = { predicted: 14_000, current: 6_000 }, rules = [rule]
     rules,
     source: control.source,
     investigate: async (alert) => void alerts.push(alert),
-    now: () => new Date(nowMs),
+    now: () => new Date(clock.ms),
+    cooldown,
     onResult: (_rule, result) => results.push(result),
     onError: (_rule, error) => errors.push(error),
   });
-  return { ...control, detector, alerts, results, errors, advance: (ms: number) => (nowMs += ms) };
+  return { ...control, detector, alerts, results, errors, advance: (ms: number) => (clock.ms += ms), clock, cooldown };
 }
 
 describe('detector preditivo', () => {
@@ -149,15 +153,119 @@ describe('detector preditivo', () => {
       source: new FixtureMetricsSource({ ...saasNoisyTenantMetrics, ...control }),
       investigate: (alert) => investigator.investigate(alert),
       now: () => new Date('2026-11-22T12:00:00Z'),
+      cooldown: new InMemoryReplayGuard(),
     });
     await detector.tick();
     const received = (await audit.records()).find((record) => record.event === 'alert_received');
     expect(received?.details).toMatchObject({ alertname: 'SaasP99LatencyHigh', predicted: true });
     expect(llm.requests[0]?.messages[1]?.content).toContain('predicted: true');
     const [incident] = await deps.incidents.list(1);
-    expect(incident).toMatchObject({ outcome: 'auto_executed', playbookId: 'saas-p99-latency' });
+    // saas é auto_execute, mas previsão nunca age sozinha: vira pedido de aprovação.
+    expect(incident).toMatchObject({ outcome: 'awaiting_approval', playbookId: 'saas-p99-latency' });
   });
 });
+
+describe('guardrails do detector', () => {
+  it('previsão com política auto_execute vira pedido de aprovação e nenhum execute acontece', async () => {
+    const control = {
+      'saas-p99-trend': [series({ service: 'saas-multitenant' }, [1.4])],
+      'saas-p99-trend-atual': [series({ service: 'saas-multitenant' }, [0.7])],
+    };
+    let executions = 0;
+    const executor: ActionExecutor = {
+      mode: 'live',
+      execute: async (action) => ({ status: 'executed', actionId: action.id, detail: `execução ${String(++executions)}` }),
+    };
+    const noisy = diagnosis({
+      hypothesisId: 'noisy_tenant',
+      confidence: 0.95,
+      evidence: [{ signal: 'requests_by_tenant', observation: 'estudio-lotus concentra 94% das requisições' }],
+      proposedAction: { actionId: 'toggle_feature_flag', rationale: 'proteger os demais tenants' },
+    });
+    const sources = { ...saasNoisyTenantMetrics, ...control };
+    const setup = await testDeps({ llm: new FakeLlmClient([noisy, noisy]), metricsSource: new FixtureMetricsSource(sources), traceSource: new FixtureTraceSource(saasNoisyTenantTraces), executor });
+    const investigator = new Investigator(setup.deps);
+    const saasRule = PredictiveRuleSchema.parse({ ...rule, name: 'saas-p99-trend', alertname: 'SaasP99LatencyHigh', service: 'saas-multitenant', threshold: 1, predict: 'max by (service) (predict_linear(p99[15m], 1800))', current: 'max by (service) (p99)' });
+    await new PredictiveDetector({ rules: [saasRule], source: new FixtureMetricsSource(sources), investigate: (alert) => investigator.investigate(alert), now: () => new Date('2026-11-22T12:00:00Z'), cooldown: new InMemoryReplayGuard() }).tick();
+
+    expect(executions).toBe(0);
+    expect(await setup.approvals.list()).toHaveLength(1);
+    const [incident] = await setup.incidents.list(1);
+    expect(incident?.decision?.verdict).toBe('needs_approval');
+    expect(incident?.decision?.checks.find((check) => check.check === 'preditivo')?.passed).toBe(false);
+
+    // O mesmo diagnóstico num alerta real (sem a marca de previsão) executa sozinho: o teto é só da previsão.
+    const real = await investigator.investigate({ ...incidentAlert(), annotations: { summary: 'alerta real' } });
+    expect(real?.outcome).toBe('auto_executed');
+    expect(executions).toBe(1);
+  });
+
+  it('sem valor atual não abre e conta como erro (nunca falha aberto)', async () => {
+    const { detector, alerts, state, results, errors } = harness();
+    state.noCurrent = true;
+    expect(await detector.tick()).toEqual([]);
+    expect(alerts).toEqual([]);
+    expect(results).toEqual(['error']);
+    expect(errors[0]).toBeInstanceOf(Error);
+  });
+
+  it('duas réplicas com a reserva compartilhada abrem uma só investigação, mesmo concorrentes', async () => {
+    const first = harness();
+    const second = harness(undefined, undefined, { cooldown: first.cooldown, clock: first.clock });
+    await Promise.all([first.detector.tick(), second.detector.tick()]);
+    expect(first.alerts.length + second.alerts.length).toBe(1);
+    expect([...first.results, ...second.results].sort()).toEqual(['cooldown', 'opened']);
+  });
+
+  it('reserva indisponível falha fechado: não abre e registra erro', async () => {
+    const broken = { firstSeen: async () => Promise.reject(new Error('redis fora')) };
+    const alerts: Alert[] = [];
+    const errors: unknown[] = [];
+    const control = controllable({ predicted: 14_000, current: 6_000 });
+    const detector = new PredictiveDetector({ rules: [rule], source: control.source, investigate: async (alert) => void alerts.push(alert), now: () => new Date(), cooldown: broken, onError: (_rule, error) => errors.push(error) });
+    await detector.tick();
+    expect(alerts).toEqual([]);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('um ciclo lento não ganha outro por cima: o segundo tick é pulado', async () => {
+    const control = controllable({ predicted: 14_000, current: 6_000 });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const alerts: Alert[] = [];
+    const results: PredictionResult[] = [];
+    const detector = new PredictiveDetector({
+      rules: [rule],
+      source: control.source,
+      investigate: async (alert) => {
+        alerts.push(alert);
+        await gate;
+      },
+      now: () => new Date(),
+      cooldown: new InMemoryReplayGuard(),
+      onResult: (_rule, result) => results.push(result),
+    });
+    const slow = detector.tick();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await detector.tick()).toEqual([]);
+    expect(results).toContain('skipped');
+    release();
+    await slow;
+    expect(alerts).toHaveLength(1);
+  });
+});
+
+function incidentAlert(): Alert {
+  return {
+    fingerprint: 'fp-real',
+    alertname: 'SaasP99LatencyHigh',
+    service: 'saas-multitenant',
+    severity: 'critical',
+    startsAt: '2026-11-22T12:05:00Z',
+    labels: { alertname: 'SaasP99LatencyHigh', service: 'saas-multitenant' },
+    annotations: {},
+  };
+}
 
 describe('regras preditivas', () => {
   it('o arquivo versionado é válido e todas as regras apontam para um playbook', async () => {

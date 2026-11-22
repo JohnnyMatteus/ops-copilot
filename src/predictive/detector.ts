@@ -2,18 +2,21 @@
 // valor previsto passa do limite e o atual ainda não, abre uma investigação com um alerta sintético
 // do playbook correspondente. Uma série não reabre dentro do cooldown nem enquanto a previsão persiste.
 import { createHash } from 'node:crypto';
+import type { ReplayGuard } from '../chatops/signature.js';
 import type { Alert } from '../domain/alert.js';
 import { durationToMs } from '../shared/duration.js';
 import type { MetricSeries, MetricsSource } from '../signals/types.js';
 import type { PredictiveRule } from './rules.js';
 
-export type PredictionResult = 'opened' | 'already_breaching' | 'active' | 'cooldown' | 'error';
+export type PredictionResult = 'opened' | 'already_breaching' | 'active' | 'cooldown' | 'error' | 'skipped';
 
 export interface DetectorDeps {
   readonly rules: readonly PredictiveRule[];
   readonly source: MetricsSource;
   readonly investigate: (alert: Alert) => Promise<unknown>;
   readonly now: () => Date;
+  /** Reserva atômica por regra+série pelo cooldown, compartilhada entre réplicas (Redis `SET NX`). */
+  readonly cooldown: ReplayGuard;
   readonly onResult?: (rule: PredictiveRule, result: PredictionResult) => void;
   readonly onError?: (rule: PredictiveRule, error: unknown) => void;
 }
@@ -26,23 +29,33 @@ export class PredictiveDetector {
   readonly #deps: DetectorDeps;
   /** Séries com previsão de violação já tratada, até a previsão se desfazer. */
   readonly #active = new Set<string>();
-  readonly #openedAt = new Map<string, number>();
+  #running = false;
 
   constructor(deps: DetectorDeps) {
     this.#deps = deps;
   }
 
+  /** Não reentra: um ciclo lento (espera as investigações) não ganha um segundo ciclo por cima. */
   async tick(): Promise<Alert[]> {
-    const opened: Alert[] = [];
-    for (const rule of this.#deps.rules) {
-      try {
-        opened.push(...(await this.#evaluate(rule)));
-      } catch (error) {
-        this.#deps.onResult?.(rule, 'error');
-        this.#deps.onError?.(rule, error);
-      }
+    if (this.#running) {
+      for (const rule of this.#deps.rules) this.#deps.onResult?.(rule, 'skipped');
+      return [];
     }
-    return opened;
+    this.#running = true;
+    try {
+      const opened: Alert[] = [];
+      for (const rule of this.#deps.rules) {
+        try {
+          opened.push(...(await this.#evaluate(rule)));
+        } catch (error) {
+          this.#deps.onResult?.(rule, 'error');
+          this.#deps.onError?.(rule, error);
+        }
+      }
+      return opened;
+    } finally {
+      this.#running = false;
+    }
   }
 
   async #evaluate(rule: PredictiveRule): Promise<Alert[]> {
@@ -62,18 +75,25 @@ export class PredictiveDetector {
         this.#deps.onResult?.(rule, 'active');
         continue;
       }
-      if ((current.get(labelsKey(series.labels)) ?? 0) >= rule.threshold) {
+      const currentValue = current.get(labelsKey(series.labels));
+      // Sem valor atual não há como saber se o alerta real já cobre o caso: não abre, é erro.
+      if (currentValue === undefined || Number.isNaN(currentValue)) {
+        this.#deps.onResult?.(rule, 'error');
+        this.#deps.onError?.(rule, new Error(`Sem valor atual para ${key}; a previsão não foi usada.`));
+        continue;
+      }
+      if (currentValue >= rule.threshold) {
         this.#deps.onResult?.(rule, 'already_breaching');
         continue;
       }
-      const openedAt = this.#openedAt.get(key);
-      if (openedAt !== undefined && now.getTime() - openedAt < durationToMs(rule.cooldown)) {
+      // Quem reserva a série pelo cooldown abre; as demais réplicas (e este processo, depois) não.
+      // Falha da reserva propaga como erro do ciclo: na dúvida, não abre.
+      if (!(await this.#deps.cooldown.firstSeen(key, durationToMs(rule.cooldown)))) {
         this.#active.add(key);
         this.#deps.onResult?.(rule, 'cooldown');
         continue;
       }
       this.#active.add(key);
-      this.#openedAt.set(key, now.getTime());
       const alert = this.#alertFor(rule, series, now);
       opened.push(alert);
       this.#deps.onResult?.(rule, 'opened');

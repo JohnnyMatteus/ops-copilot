@@ -130,6 +130,7 @@ export async function createApp(env: Env, logger: Logger) {
     source: metricsSource,
     investigate: (alert) => investigator.investigate(alert),
     now: () => new Date(),
+    cooldown: state.cooldown,
     onResult: (rule, result) => metrics.predictions.inc({ rule: rule.name, result }),
     onError: (rule, error) => logger.error({ err: error, rule: rule.name }, 'falha na detecção preditiva'),
   });
@@ -180,6 +181,7 @@ interface StateAdapters {
   readonly journal: InvestigationJournal;
   readonly effects: EffectGuard;
   readonly replay: ReplayGuard;
+  readonly cooldown: ReplayGuard;
   close(): Promise<void>;
 }
 
@@ -195,6 +197,7 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
       journal: new InMemoryInvestigationJournal(),
       effects: new InMemoryEffectGuard(),
       replay: new InMemoryReplayGuard(),
+      cooldown: new InMemoryReplayGuard(),
       close: async () => undefined,
     };
   }
@@ -207,6 +210,7 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
     journal: new RedisInvestigationJournal(redis),
     effects: new RedisEffectGuard(redis),
     replay: new RedisReplayGuard(redis),
+    cooldown: new RedisReplayGuard(redis, 'ops-copilot:predictive:cooldown'),
     close: async () => {
       await redis.quit();
     },

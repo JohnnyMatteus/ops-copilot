@@ -40,6 +40,8 @@ export interface GateInput {
   readonly playbook: Playbook;
   readonly hypothesisId: string;
   readonly confidence: number;
+  /** Alerta de origem preditiva: nunca executa sozinho (ADR 0020). Só reduz autonomia, então um valor forjado é seguro. */
+  readonly predicted?: boolean;
   readonly proposal: { readonly actionId: string; readonly params: Readonly<Record<string, unknown>> };
 }
 
@@ -109,6 +111,11 @@ export function evaluate(input: GateInput, service: ResolvedServicePolicy, budge
     record('kill_switch', false, 'ligado: no máximo sugerir');
   } else {
     record('kill_switch', true, 'desligado');
+  }
+  if (input.predicted) {
+    ceilings.push('execute_with_approval');
+    reasons.push('Alerta preditivo: a execução exige aprovação humana.');
+    record('preditivo', false, 'previsão não age sozinha: no máximo executar com aprovação');
   }
   const level = mostRestrictive(service.level, ...ceilings);
   record(
