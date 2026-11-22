@@ -8,7 +8,6 @@ export const URLS = {
   prometheus: `http://localhost:${porta('PROMETHEUS_PORT', 9090)}`,
   alertmanager: `http://localhost:${porta('ALERTMANAGER_PORT', 9093)}`,
   jaeger: `http://localhost:${porta('JAEGER_UI_PORT', 16686)}`,
-  minioConsole: `http://localhost:${porta('MINIO_CONSOLE_PORT', 9001)}`,
 };
 
 export const TOKENS = {
@@ -16,10 +15,6 @@ export const TOKENS = {
   operador: process.env['OPERATOR_TOKEN'] ?? 'dev-only-operador-plantao',
 };
 
-export const MINIO_ADMIN = {
-  usuario: process.env['MINIO_ROOT_USER'] ?? 'ops-copilot-admin',
-  senha: process.env['MINIO_ROOT_PASSWORD'] ?? 'dev-only-change-me',
-};
 
 const RAIZ = join(import.meta.dirname, '..', '..', '..');
 const COMPOSE = ['compose', '-p', 'ops-copilot', '-f', 'docker-compose.yml', '-f', 'docker-compose.evidencia.yml'];
@@ -33,6 +28,6 @@ export function redisCli(...args: string[]): string {
   return compose(['--profile', 'core', 'exec', '-T', 'redis', 'redis-cli', ...args]);
 }
 
-export function mc(script: string): string {
-  return compose(['--profile', 'core', '--profile', 'tools', 'run', '--rm', '--no-deps', '--entrypoint', 'sh', 'mc', '-c', script]);
+export function awslocal(...args: string[]): string {
+  return compose(['--profile', 'core', 'exec', '-T', 'localstack', 'awslocal', ...args]);
 }

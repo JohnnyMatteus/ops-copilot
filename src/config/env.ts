@@ -46,7 +46,7 @@ export const EnvSchema = z
     AUDIT_S3_BUCKET: z.string().min(3).default('ops-copilot-audit'),
     AUDIT_S3_PREFIX: z.string().default('audit/'),
     AWS_REGION: z.string().min(1).default('us-east-1'),
-    /** Vazio usa a AWS; no ambiente local aponta para o MinIO. */
+    /** Vazio usa a AWS; no ambiente local aponta para o LocalStack. */
     S3_ENDPOINT: z.url().optional(),
     EXECUTION_MODE: ExecutionModeSchema.default('dry-run'),
     /** Executor real (EXECUTION_MODE=live): tudo explícito, sem padrões que alcancem a máquina. */

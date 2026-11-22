@@ -15,7 +15,7 @@ O domínio (gate, grafo, casos de uso) depende de interfaces. Os adaptadores con
 | [`RunbookRetriever`](../../src/rag/runbooks.ts) | MiniSearch (BM25) em memória |
 | [`InvestigationJournal`](../../src/incident/journal.ts), [`EffectGuard`](../../src/incident/effects.ts) | Redis (lease com dono, `SET NX`), em memória |
 | `BaseCheckpointSaver` (LangGraph) | [`RedisCheckpointSaver`](../../src/graph/redis-checkpointer.ts), `MemorySaver` |
-| [`ObjectStore`](../../src/storage/object-store.ts#L3) | S3/MinIO, em memória |
+| [`ObjectStore`](../../src/storage/object-store.ts#L3) | S3 (LocalStack/AWS), em memória |
 | [`AuditLog`](../../src/autonomy/audit.ts#L40) | S3 com object lock, arquivo JSONL, em memória |
 | [`ActionBudget`](../../src/autonomy/budget.ts#L7) | [Redis](../../src/autonomy/redis-budget.ts#L15), [em memória](../../src/autonomy/budget.ts#L13) |
 | [`ApprovalQueue`](../../src/incident/approvals.ts#L18) | [Redis](../../src/incident/redis-approvals.ts#L14), [em memória](../../src/incident/approvals.ts#L35) |

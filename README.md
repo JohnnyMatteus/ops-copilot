@@ -60,15 +60,15 @@ Pré-requisitos: Node 22, pnpm 12 e Docker.
 ```bash
 cp .env.example .env
 pnpm install
-make up          # copiloto + Redis + MinIO + Prometheus/Alertmanager/Jaeger com dados sintéticos
+make up          # copiloto + Redis + LocalStack S3 + Prometheus/Alertmanager/Jaeger com dados sintéticos
 make seed        # dispara um alerta de exemplo (SCENARIO=saas|payments|telemetry)
 make logs        # acompanha a investigação
-make audit       # lista a trilha de auditoria no MinIO
+make audit       # lista a trilha de auditoria (objetos e versões) no S3 local
 ```
 
 - Prometheus: http://localhost:9090 (os alertas sintéticos disparam e se resolvem sozinhos a cada poucos minutos)
 - Jaeger: http://localhost:16686 (traces sintéticos dos três serviços e do próprio copiloto)
-- Console do MinIO: http://localhost:9001
+- S3 local (LocalStack): http://localhost:4566 (só a API, sem console)
 - Se alguma porta estiver em uso, mude-a no `.env` (`COPILOT_PORT`, `PROMETHEUS_PORT` etc.).
 
 **LLM.** Por padrão o copiloto usa um Ollama no host (`ollama pull qwen2.5:7b-instruct`). Para usar o OpenRouter, defina `LLM_PROVIDER=openrouter`, `OPENROUTER_API_KEY` e as URLs no `.env`. Sem LLM disponível, a investigação termina em `diagnosis_failed`, que é explícito e auditado.
@@ -94,14 +94,16 @@ Para desenvolver no host: `make dev` (usa o `.env`). Sem `REDIS_URL`, o estado f
 
 ```bash
 make test              # lint + typecheck + testes unitários + evals com modelo falso
-make test-integration  # contra Prometheus, Jaeger, MinIO e Redis do compose (rode make up antes)
+make test-integration  # contra Prometheus, Jaeger, LocalStack S3 e Redis do compose (rode make up antes)
 pnpm eval --model real # evals com o LLM do .env (manual; custa tokens)
 ```
 
 - **Nenhum teste chama LLM real.** O `FakeLlmClient` responde de forma roteirizada.
 - `tests/autonomy/gate.test.ts` prova que ações fora do limite são bloqueadas: ação desconhecida, fora da allowlist, fora do playbook, hipótese errada, parâmetros fora dos limites, serviço somente leitura, kill switch, orçamento esgotado e ação irreversível.
 - `tests/graph/investigation.test.ts` roda o grafo de ponta a ponta, incluindo injeção de prompt no alerta, falha de schema, falha do executor e spans OpenTelemetry.
-- Os testes de integração provam, no MinIO real, que a trilha de auditoria não pode ser sobrescrita nem apagada.
+- Os testes de integração provam, no LocalStack, que a trilha de auditoria não pode ser sobrescrita nem apagada.
+
+**Limites do S3 local (ADR 0021).** O LocalStack community não persiste dados entre recriações do contêiner: no ambiente local a trilha de auditoria **não é durável** (`docker compose down` ou recriar o serviço a apaga). Ele também não é prova de conformidade de object lock: o job `s3-localstack` do CI mostra que o comportamento exercitado pelos testes se sustenta nesta versão (`localstack/localstack:4.4.0`), mas a garantia real de imutabilidade é a da AWS (modo `COMPLIANCE`). A política "só anexar e ler" do usuário do copiloto não é aplicada no LocalStack community (não há enforcement de IAM); ela vale na AWS.
 
 ## Interface
 
@@ -145,10 +147,11 @@ Entre com o token de operador do `.env` (`dev-only-operador-plantao`, em `OPERAT
 | [0007](docs/adr/0007-trilha-de-auditoria-encadeada-por-hash.md) | Trilha de auditoria encadeada por hash |
 | [0008](docs/adr/0008-evals-com-modelo-falso-no-ci.md) | Evals com modelo falso no CI e real sob demanda |
 | [0009](docs/adr/0009-sem-playbook-sem-llm.md) | Alerta sem playbook não é investigado pelo LLM |
-| [0010](docs/adr/0010-auditoria-em-s3-com-object-lock.md) | Trilha de auditoria em S3 com object lock (MinIO local) |
+| [0010](docs/adr/0010-auditoria-em-s3-com-object-lock.md) | Trilha de auditoria em S3 com object lock |
 | [0011](docs/adr/0011-estado-operacional-no-redis.md) | Orçamento, aprovações e incidentes no Redis, com falha fechada |
 | [0012](docs/adr/0012-autenticacao-de-operador.md) | Autenticação de operador: token de dev ou OIDC opcional |
 | [0013](docs/adr/0013-decisao-humana-aprovar-recusar-cancelar.md) | Aprovar, recusar com motivo e cancelar, com a identidade de quem decidiu |
+| [0021](docs/adr/0021-localstack-no-s3-local.md) | LocalStack no S3 local (substitui a parte do ADR 0010 sobre o servidor local) |
 
 Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs/roteiros/limites-de-autonomia.md) e [roteiro dos playbooks](docs/roteiros/playbooks.md). O desenho completo está no [design doc](docs/design-doc.md).
 

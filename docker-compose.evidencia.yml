@@ -1,7 +1,7 @@
 # Sobreposição usada por `make evidencia`: o incidente fica ativo desde a subida (as métricas
 # sintéticas param no estado de alerta em vez de seguir o ciclo senoidal) e o diagnóstico vem do
 # modelo roteirizado, porque a gravação não tem LLM real. Prometheus, Alertmanager, Jaeger, Redis e
-# MinIO são os mesmos do `make up`.
+# LocalStack S3 são os mesmos do `make up`.
 services:
   ops-copilot:
     environment:

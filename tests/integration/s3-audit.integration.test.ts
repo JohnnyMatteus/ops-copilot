@@ -16,7 +16,7 @@ const entry = (incidentId: string) => ({
   details: { verdict: 'auto_execute' },
 });
 
-describe('trilha de auditoria no MinIO com object lock', () => {
+describe('trilha de auditoria no S3 local (LocalStack) com object lock', () => {
   const prefix = `it/${randomUUID()}/`;
   const store = new S3ObjectStore({ bucket: AUDIT_BUCKET, region: 'us-east-1', client: client(WRITER) });
 

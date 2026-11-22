@@ -1,11 +1,11 @@
-// Adaptador S3. O mesmo código fala com a AWS ou com o MinIO local trocando endpoint e credenciais.
+// Adaptador S3. O mesmo código fala com a AWS ou com o S3 local (LocalStack) trocando endpoint e credenciais.
 import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { ObjectAlreadyExistsError, type ObjectStore } from './object-store.js';
 
 export interface S3ObjectStoreOptions {
   readonly bucket: string;
   readonly region: string;
-  /** Vazio na AWS; `http://localhost:9000` no MinIO local. */
+  /** Vazio na AWS; `http://localhost:4566` no LocalStack. */
   readonly endpoint?: string | undefined;
   readonly client?: S3Client;
 }

@@ -12,7 +12,7 @@ export interface Chamada {
 export interface Detalhe {
   readonly descricao: string;
   readonly chamada?: Chamada;
-  /** Saída real de um comando (redis-cli, mc, docker compose). */
+  /** Saída real de um comando (redis-cli, awslocal, docker compose). */
   readonly comando?: { readonly linha: string; readonly saida: string };
   readonly pausaMs?: number;
 }

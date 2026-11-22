@@ -1,7 +1,6 @@
 # Ambiente local do ops-copilot.
-#   core           copiloto + Redis (orçamento, aprovações e incidentes) + MinIO (auditoria, ADR 0010)
+#   core           copiloto + Redis (orçamento, aprovações e incidentes) + LocalStack S3 (auditoria, ADR 0010 e 0021)
 #   observability  Prometheus com métricas sintéticas, Alertmanager, Jaeger e gerador de traces
-#   tools          cliente mc para inspecionar a trilha de auditoria
 # `make up` sobe core + observability (modo autônomo). `make up-portfolio` sobe só o core na rede
 # portfolio-net, observando o Prometheus e o Jaeger dos outros projetos.
 # Variáveis e portas do host: veja .env.example.
@@ -40,8 +39,9 @@ services:
       SLACK_APPROVAL_CHANNEL: ${SLACK_APPROVAL_CHANNEL:-}
       AUDIT_SINK: s3
       AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
-      S3_ENDPOINT: http://minio:9000
+      S3_ENDPOINT: http://localstack:4566
       AWS_REGION: us-east-1
+      # O LocalStack aceita qualquer credencial; na AWS de verdade use um usuário só de anexar e ler.
       AWS_ACCESS_KEY_ID: ${AUDIT_WRITER_ACCESS_KEY:-audit-writer}
       AWS_SECRET_ACCESS_KEY: ${AUDIT_WRITER_SECRET_KEY:-dev-only-audit-writer-change-me}
       REDIS_URL: redis://redis:6379
@@ -50,8 +50,8 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     depends_on:
-      minio-init:
-        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
       redis:
         condition: service_healthy
       # Opcionais: no modo portfolio o copiloto observa o Prometheus e o Jaeger de outros projetos.
@@ -111,47 +111,29 @@ services:
     networks: [ops-copilot-net]
     <<: *limits-small
 
-  minio:
+  # S3 local (LocalStack, só o serviço s3). O bucket de auditoria com object lock é criado pelo script de init
+  # quando o LocalStack fica pronto; o healthcheck só passa depois dele. Sem persistência entre recriações (ADR 0021).
+  localstack:
     profiles: [core]
-    image: minio/minio:RELEASE.2025-04-03T14-56-28Z
-    command: ['server', '/data', '--console-address', ':9001']
+    image: localstack/localstack:4.4.0
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ops-copilot-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev-only-change-me}
-    volumes:
-      - minio-data:/data
-    ports:
-      - '127.0.0.1:${MINIO_API_PORT:-9000}:9000'
-      - '127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001'
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks: [ops-copilot-net]
-    deploy:
-      resources:
-        # Abaixo de ~1 GiB o MinIO fica lento e o healthcheck oscila.
-        limits: { cpus: '1.0', memory: 1G }
-
-  minio-init:
-    profiles: [core]
-    image: minio/mc:RELEASE.2025-04-03T17-07-56Z
-    entrypoint: ['/bin/sh', '/init/init.sh']
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ops-copilot-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev-only-change-me}
+      SERVICES: s3
+      DEBUG: '0'
       AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-30}
-      AUDIT_WRITER_ACCESS_KEY: ${AUDIT_WRITER_ACCESS_KEY:-audit-writer}
-      AUDIT_WRITER_SECRET_KEY: ${AUDIT_WRITER_SECRET_KEY:-dev-only-audit-writer-change-me}
+    ports:
+      - '127.0.0.1:${S3_PORT:-4566}:4566'
     volumes:
-      - ./deploy/minio:/init:ro
-    depends_on:
-      minio:
-        condition: service_healthy
+      - ./deploy/localstack/init-s3.sh:/etc/localstack/init/ready.d/10-audit-bucket.sh:ro
+    healthcheck:
+      # /_localstack/init/ready devolve "completed": true e o estado de cada script (fonte do LocalStack v4.4.0).
+      # Pronto = estágio concluído, script do bucket executado e nenhum em erro.
+      test: ["CMD-SHELL", "out=$$(curl -fsS http://127.0.0.1:4566/_localstack/init/ready) && echo \"$$out\" | grep -Eq '\"completed\": ?true' && echo \"$$out\" | grep -q '\"SUCCESSFUL\"' && ! echo \"$$out\" | grep -q '\"ERROR\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
     networks: [ops-copilot-net]
-    <<: *limits-small
 
   prometheus:
     profiles: [observability]
@@ -236,27 +218,11 @@ services:
     networks: [ops-copilot-net]
     <<: *limits-small
 
-  mc:
-    profiles: [tools]
-    image: minio/mc:RELEASE.2025-04-03T17-07-56Z
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null && mc ls --versions --recursive local/$${AUDIT_S3_BUCKET}
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ops-copilot-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dev-only-change-me}
-      AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
-    depends_on:
-      minio:
-        condition: service_healthy
-    networks: [ops-copilot-net]
-
 networks:
   ops-copilot-net:
     name: ops-copilot-net
 
 volumes:
   redis-data:
-  minio-data:
   prometheus-data:
   alertmanager-data:

@@ -108,7 +108,7 @@ jobs:
 
       - name: Validar docker-compose
         run: |
-          docker compose --profile core --profile observability --profile tools config -q
+          docker compose --profile core --profile observability config -q
           docker compose -f docker-compose.yml -f docker-compose.portfolio.yml --profile core config -q
           docker compose -f docker-compose.yml -f docker-compose.evidencia.yml --profile core --profile observability config -q
 
@@ -125,3 +125,46 @@ jobs:
 
       - name: Build da imagem do painel
         run: docker build -t ops-copilot-web:ci web
+
+  s3-localstack:
+    name: S3 local (LocalStack) e object lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Instalar Node (versão do .nvmrc)
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      # O perfil core inteiro pelo compose real: --wait só retorna com todos os healthchecks verdes, e o do
+      # LocalStack só passa depois que o init-s3.sh terminou sem erro (bucket com object lock criado).
+      - name: Subir o perfil core (compose real, --wait)
+        run: |
+          set -o pipefail
+          docker compose --profile core up -d --build --wait --wait-timeout 600 2>&1 | tee compose-up.log
+
+      - name: Provar o object lock (testes de integração existentes, sem afrouxar)
+        run: |
+          set -o pipefail
+          pnpm exec vitest run --config vitest.integration.config.ts tests/integration/s3-audit.integration.test.ts 2>&1 | tee s3-integration.log
+
+      - name: Logs do compose em caso de falha
+        if: failure()
+        run: docker compose --profile core logs --no-color --tail=200 localstack ops-copilot
+
+      # Só no runner: derruba o ambiente e apaga os volumes.
+      - name: Derrubar o ambiente
+        if: always()
+        run: docker compose --profile core down -v --remove-orphans

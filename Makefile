@@ -13,14 +13,14 @@ help: ## Lista os alvos
 network: ## Cria a rede compartilhada portfolio-net (idempotente)
 	@docker network inspect portfolio-net >/dev/null 2>&1 || docker network create portfolio-net
 
-up: ## Sobe copiloto, MinIO e a stack de observabilidade sintética (modo autônomo)
+up: ## Sobe copiloto, LocalStack S3 e a stack de observabilidade sintética (modo autônomo)
 	$(COMPOSE) $(PROFILES) up -d --build --wait
 
 up-portfolio: network ## Sobe só o núcleo na portfolio-net, observando os outros projetos
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.portfolio.yml --profile core up -d --build --wait
 
 down: ## Para os contêineres (mantém volumes)
-	$(COMPOSE) $(PROFILES) --profile tools down
+	$(COMPOSE) $(PROFILES) down
 
 logs: ## Acompanha os logs
 	$(COMPOSE) $(PROFILES) logs -f --tail=100
@@ -31,8 +31,8 @@ ps: ## Estado dos serviços
 seed: ## Dispara um alerta de exemplo (SCENARIO=saas|payments|telemetry)
 	./scripts/seed-alert.sh $(SCENARIO)
 
-audit: ## Lista os objetos (e versões) da trilha de auditoria no MinIO
-	$(COMPOSE) --profile core --profile tools run --rm --no-deps mc
+audit: ## Lista os objetos (e versões) da trilha de auditoria no S3 local (LocalStack)
+	$(COMPOSE) --profile core exec -T localstack awslocal s3api list-object-versions --bucket "$(or $(AUDIT_S3_BUCKET),ops-copilot-audit)"
 
 dev: ## Roda o copiloto no host com recarga (usa .env)
 	pnpm dev
@@ -46,7 +46,7 @@ web-test: ## Lint, typecheck, testes e build do painel
 test: ## Lint, typecheck, testes unitários e evals com modelo falso
 	pnpm lint && pnpm typecheck && pnpm test && pnpm eval
 
-test-integration: ## Testes contra Prometheus, Jaeger, MinIO e Redis do compose (rode make up antes)
+test-integration: ## Testes contra Prometheus, Jaeger, LocalStack S3 e Redis do compose (rode make up antes)
 	pnpm test:integration
 
 lint: ## Lint e typecheck
@@ -59,5 +59,5 @@ build: ## Compila TypeScript para dist/
 	pnpm build
 
 clean: ## Remove contêineres, volumes e artefatos locais
-	$(COMPOSE) $(PROFILES) --profile tools down -v --remove-orphans
+	$(COMPOSE) $(PROFILES) down -v --remove-orphans
 	rm -rf dist coverage var evals/reports
