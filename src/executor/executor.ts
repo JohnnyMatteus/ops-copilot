@@ -5,10 +5,19 @@ import type { ApprovedAction } from '../autonomy/gate.js';
 export const ExecutionModeSchema = z.enum(['dry-run', 'live']);
 export type ExecutionMode = z.infer<typeof ExecutionModeSchema>;
 
+/** Ação inversa que desfaz o efeito; o rollback a reenvia ao gate, nunca a executa direto. */
+export const UndoProposalSchema = z.object({
+  actionId: z.string(),
+  params: z.record(z.string(), z.unknown()),
+});
+export type UndoProposal = z.infer<typeof UndoProposalSchema>;
+
 export const ExecutionResultSchema = z.object({
   status: z.enum(['dry_run', 'executed', 'failed']),
   actionId: z.string(),
   detail: z.string(),
+  /** Presente só quando o executor mudou o estado e sabe como restaurá-lo. */
+  undo: UndoProposalSchema.nullable().optional(),
 });
 export type ExecutionResult = z.infer<typeof ExecutionResultSchema>;
 
@@ -42,15 +51,4 @@ export class ExecutorConfigError extends Error {
     super(message);
     this.name = 'ExecutorConfigError';
   }
-}
-
-/**
- * O modo live exige adaptadores reais (Kubernetes, feature flags, filas) que ficam para a próxima
- * fase. Pedir live hoje é erro explícito na subida, nunca uma degradação silenciosa para dry-run.
- */
-export function createExecutor(mode: ExecutionMode): ActionExecutor {
-  if (mode === 'live') {
-    throw new ExecutorConfigError('EXECUTION_MODE=live ainda não tem adaptadores reais; use dry-run.');
-  }
-  return new DryRunExecutor();
 }

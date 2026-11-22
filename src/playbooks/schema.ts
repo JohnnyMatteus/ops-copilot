@@ -1,7 +1,7 @@
 // Schema dos playbooks versionados em YAML (ADR 0003). O playbook diz O QUE investigar e QUAIS ações
 // fazem sentido; se a ação pode rodar sozinha é decisão da política de autonomia, não do playbook.
 import { z } from 'zod';
-import { ActionIdSchema } from '../autonomy/catalog.js';
+import { ActionIdSchema, INVERSE_ACTION_IDS } from '../autonomy/catalog.js';
 import { AutonomyLevelSchema } from '../autonomy/levels.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, 'use letras minúsculas, dígitos, "-" ou "_"');
@@ -37,7 +37,7 @@ export const HypothesisSchema = z.strictObject({
 });
 
 export const PlaybookActionSchema = z.strictObject({
-  action: ActionIdSchema,
+  action: ActionIdSchema.refine((id) => !INVERSE_ACTION_IDS.has(id), 'ação inversa não pode constar em playbook'),
   /** Hipóteses para as quais a ação faz sentido. O gate bloqueia a ação para outras hipóteses. */
   when: z.array(slug).min(1),
   /** Parâmetros fixos do playbook; o LLM não pode sobrescrevê-los. */

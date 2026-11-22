@@ -1,0 +1,13 @@
+# Allowlist de alvos do executor real (ADR 0014). Só vale com EXECUTION_MODE=live. Deny-by-default:
+# serviço, namespace, deployment, flag ou fila que não aparecem aqui nunca são tocados.
+apiVersion: ops-copilot/v1
+kind: ExecutorTargets
+kubernetes:
+  payments-events-go: { namespace: payments, deployments: [payments-consumer] }
+  kafka-telemetry: { namespace: telemetry, deployments: [readings-enricher] }
+  saas-multitenant: { namespace: saas, deployments: [saas-api] }
+featureFlags:
+  saas-multitenant: [reports.heavy_export]
+dlq:
+  payments-events-go:
+    - { queue: payments.events.dlq, replayTo: payments.events }

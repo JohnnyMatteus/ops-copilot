@@ -13,6 +13,8 @@ export interface ActionDefinition {
   /** Teto de autonomia da ação, independentemente da política do serviço. */
   readonly maxAutonomy: AutonomyLevel;
   readonly params: z.ZodType<Record<string, unknown>>;
+  /** Ação que desfaz esta. O rollback só existe para quem declara uma (ADR 0015). */
+  readonly inverse?: string;
 }
 
 export const ACTION_CATALOG = {
@@ -28,6 +30,7 @@ export const ACTION_CATALOG = {
     description: 'Aumenta réplicas de um deployment, com teto absoluto.',
     reversible: true,
     maxAutonomy: 'auto_execute',
+    inverse: 'restore_deployment_replicas',
     params: z
       .strictObject({
         deployment: k8sName,
@@ -40,10 +43,32 @@ export const ACTION_CATALOG = {
     description: 'Desliga uma funcionalidade degradável (a ação inversa religa).',
     reversible: true,
     maxAutonomy: 'auto_execute',
+    inverse: 'restore_feature_flag',
     params: z.strictObject({
       flag: z.string().regex(/^[a-z0-9_.-]{1,64}$/),
       enabled: z.literal(false),
     }),
+  },
+  // Ações inversas (ADR 0015): só entram pelo rollback, com aprovação humana. O gate normal as bloqueia
+  // por código (INVERSE_ACTION_IDS) e os schemas de playbook e política as recusam.
+  restore_deployment_replicas: {
+    id: 'restore_deployment_replicas',
+    description: 'Devolve o deployment à contagem de réplicas anterior a scale_deployment.',
+    reversible: true,
+    maxAutonomy: 'execute_with_approval',
+    // `expectedCurrent` é o valor que o scale deixou: se o atual for outro, alguém mexeu depois e o undo recusa.
+    params: z.strictObject({
+      deployment: k8sName,
+      replicas: z.number().int().min(0).max(12),
+      expectedCurrent: z.number().int().min(0).max(12),
+    }),
+  },
+  restore_feature_flag: {
+    id: 'restore_feature_flag',
+    description: 'Religa a flag desligada por toggle_feature_flag.',
+    reversible: true,
+    maxAutonomy: 'execute_with_approval',
+    params: z.strictObject({ flag: z.string().regex(/^[a-z0-9_.-]{1,64}$/), enabled: z.literal(true) }),
   },
   replay_dlq_batch: {
     id: 'replay_dlq_batch',
@@ -80,6 +105,11 @@ export const ACTION_CATALOG = {
 export type ActionId = keyof typeof ACTION_CATALOG;
 
 export const ActionIdSchema = z.enum(Object.keys(ACTION_CATALOG) as [ActionId, ...ActionId[]]);
+
+/** Ações que existem só como inversas de outras: o gate normal as bloqueia, só o rollback as avalia. */
+export const INVERSE_ACTION_IDS: ReadonlySet<string> = new Set(
+  Object.values(ACTION_CATALOG).flatMap((definition) => ('inverse' in definition ? [definition.inverse] : [])),
+);
 
 export function findAction(id: string): ActionDefinition | undefined {
   return Object.hasOwn(ACTION_CATALOG, id) ? ACTION_CATALOG[id as ActionId] : undefined;

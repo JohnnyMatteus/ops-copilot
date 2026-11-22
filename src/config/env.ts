@@ -41,6 +41,15 @@ export const EnvSchema = z
     /** Vazio usa a AWS; no ambiente local aponta para o MinIO. */
     S3_ENDPOINT: z.url().optional(),
     EXECUTION_MODE: ExecutionModeSchema.default('dry-run'),
+    /** Executor real (EXECUTION_MODE=live): tudo explícito, sem padrões que alcancem a máquina. */
+    EXECUTOR_TARGETS_FILE: z.string().min(1).optional(),
+    KUBE_AUTH: z.enum(['in-cluster', 'kubeconfig']).optional(),
+    KUBECONFIG_PATH: z.string().min(1).optional(),
+    KUBE_CONTEXT: z.string().min(1).optional(),
+    FEATURE_FLAGS_URL: z.url().optional(),
+    FEATURE_FLAGS_TOKEN: token.optional(),
+    /** Redis onde vivem as filas de DLQ; separado do Redis de estado do copiloto. */
+    DLQ_REDIS_URL: z.url().optional(),
     APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(30),
     WEBHOOK_TOKEN: token,
     /** Operadores do ambiente local (ADR 0012): `email=token,email2=token2`. */
@@ -61,6 +70,7 @@ export const EnvSchema = z
   })
   .superRefine((env, ctx) => {
     requireOpenRouterKey(env, ctx);
+    if (env.EXECUTION_MODE === 'live') requireLiveConfig(env, ctx);
     if (!env.OPERATOR_TOKENS && !env.OIDC_ISSUER_URL) {
       ctx.addIssue({ code: 'custom', path: ['OPERATOR_TOKENS'], message: 'defina OPERATOR_TOKENS ou OIDC_ISSUER_URL' });
     }
@@ -76,6 +86,32 @@ export const EnvSchema = z
     }
   });
 export type Env = z.infer<typeof EnvSchema>;
+
+interface LiveEnv {
+  EXECUTOR_TARGETS_FILE?: string | undefined;
+  KUBE_AUTH?: string | undefined;
+  KUBECONFIG_PATH?: string | undefined;
+  KUBE_CONTEXT?: string | undefined;
+  FEATURE_FLAGS_URL?: string | undefined;
+  FEATURE_FLAGS_TOKEN?: string | undefined;
+  DLQ_REDIS_URL?: string | undefined;
+}
+
+/** O modo live só sobe com a allowlist de alvos e ao menos um backend configurados à mão. */
+function requireLiveConfig(env: LiveEnv, ctx: z.RefinementCtx): void {
+  const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+  if (!env.EXECUTOR_TARGETS_FILE) issue('EXECUTOR_TARGETS_FILE', 'obrigatória com EXECUTION_MODE=live');
+  if (env.KUBE_AUTH === 'kubeconfig') {
+    if (!env.KUBECONFIG_PATH) issue('KUBECONFIG_PATH', 'obrigatória com KUBE_AUTH=kubeconfig');
+    if (!env.KUBE_CONTEXT) issue('KUBE_CONTEXT', 'obrigatória com KUBE_AUTH=kubeconfig');
+  }
+  if (Boolean(env.FEATURE_FLAGS_URL) !== Boolean(env.FEATURE_FLAGS_TOKEN)) {
+    issue('FEATURE_FLAGS_TOKEN', 'FEATURE_FLAGS_URL e FEATURE_FLAGS_TOKEN andam juntas');
+  }
+  if (!env.KUBE_AUTH && !env.FEATURE_FLAGS_URL && !env.DLQ_REDIS_URL) {
+    issue('KUBE_AUTH', 'configure ao menos um backend (KUBE_AUTH, FEATURE_FLAGS_URL ou DLQ_REDIS_URL)');
+  }
+}
 
 export class ConfigError extends Error {
   constructor(message: string) {
