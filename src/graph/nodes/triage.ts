@@ -9,7 +9,12 @@ export function createTriageNode(deps: InvestigationDeps) {
       incidentId,
       event: 'alert_received',
       actor: 'copilot',
-      details: { alertname: alert.alertname, service: alert.service, fingerprint: alert.fingerprint },
+      details: {
+        alertname: alert.alertname,
+        service: alert.service,
+        fingerprint: alert.fingerprint,
+        predicted: alert.annotations['predicted'] === 'true',
+      },
     });
 
     const playbook = deps.playbooks.match(alert);

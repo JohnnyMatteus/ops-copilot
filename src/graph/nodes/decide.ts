@@ -13,6 +13,7 @@ export function createDecideNode(deps: InvestigationDeps) {
       playbook,
       hypothesisId: diagnosis.hypothesisId,
       confidence: diagnosis.confidence,
+      predicted: alert.annotations['predicted'] === 'true',
       proposal: { actionId: diagnosis.proposedAction.actionId, params: diagnosis.proposedAction.params },
     });
     deps.metrics.decisions.inc({

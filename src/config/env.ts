@@ -58,6 +58,9 @@ export const EnvSchema = z
     FEATURE_FLAGS_TOKEN: token.optional(),
     /** Redis onde vivem as filas de DLQ; separado do Redis de estado do copiloto. */
     DLQ_REDIS_URL: z.url().optional(),
+    /** Detecção preditiva (ADR 0020). Vazio desliga. */
+    PREDICTIVE_RULES_FILE: z.string().default('config/predictive-rules.yaml'),
+    PREDICTIVE_INTERVAL_SECONDS: z.coerce.number().int().min(15).max(3600).default(60),
     /** ChatOps no Slack (ADR 0019). Sem SLACK_SIGNING_SECRET a rota de interações fica desligada. */
     SLACK_SIGNING_SECRET: blankable(token),
     SLACK_USERS: blankable(z.string()),

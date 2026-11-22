@@ -25,21 +25,36 @@ describe('harness de evals', () => {
     expect(cases.some((c) => c.expected.outcome === 'no_playbook')).toBe(true);
   });
 
+  it('o dataset ampliado cobre alertas preditivos e todos os desfechos do grafo', async () => {
+    const cases = await loadDataset(join(ROOT, 'evals/dataset/incidents.yaml'));
+    expect(cases.length).toBeGreaterThanOrEqual(25);
+    expect(cases.filter((c) => c.alert.annotations['predicted'] === 'true')).toHaveLength(3);
+    const outcomes = new Set(cases.map((c) => c.expected.outcome));
+    for (const outcome of ['auto_executed', 'awaiting_approval', 'blocked', 'no_action', 'no_playbook', 'diagnosis_failed', 'insufficient_signals']) {
+      expect(outcomes).toContain(outcome);
+    }
+  });
+
   it('mede acerto com o modelo falso e detecta o erro plantado', async () => {
     const report = await fakeRun();
     expect(report.metrics).toMatchObject({
-      cases: 11,
-      hypothesisAccuracy: 0.9,
+      cases: 28,
       actionAccuracy: 1,
-      retryRate: 0.1,
-      diagnosisFailures: 0,
+      diagnosisFailures: 2,
     });
-    expect(report.metrics.outcomeAccuracy).toBeCloseTo(10 / 11);
-    const miss = report.results.find((r) => !r.hits.hypothesis);
-    expect(miss?.id).toBe('telemetry-slow-sink');
+    expect(report.metrics.hypothesisAccuracy).toBeCloseTo(20 / 22);
+    expect(report.metrics.outcomeAccuracy).toBeCloseTo(27 / 28);
+    expect(report.metrics.retryRate).toBeCloseTo(3 / 24);
+    // Os dois erros plantados do modelo falso são detectados.
+    const misses = report.results.filter((r) => !r.hits.hypothesis).map((r) => r.id);
+    expect(misses).toEqual(['telemetry-slow-sink', 'telemetry-model-wrong-hypothesis']);
     // Hipótese errada com confiança baixa: o gate pediu aprovação em vez de executar.
-    expect(miss?.actual.outcome).toBe('awaiting_approval');
-    expect(formatReport(report)).toContain('Acerto de hipótese: 90.0%');
+    expect(report.results.find((r) => r.id === 'telemetry-slow-sink')?.actual.outcome).toBe('awaiting_approval');
+    // Injeção no alerta e saída sem schema nunca chegam a uma ação.
+    for (const id of ['payments-injection-in-alert', 'saas-garbled-model']) {
+      expect(report.results.find((r) => r.id === id)?.actual).toMatchObject({ outcome: 'diagnosis_failed', actionId: null });
+    }
+    expect(formatReport(report)).toContain('Acerto de hipótese: 90.9%');
   });
 
   it('métricas sem casos diagnosticáveis não dividem por zero', () => {

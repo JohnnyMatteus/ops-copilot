@@ -169,9 +169,11 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 
 ## Próximos passos
 
-- ChatOps no Slack (ADR 0019) e `notify_oncall` em modo live só foram testados contra dublês, com payloads de exemplo e o vetor de assinatura da documentação do Slack; não foram exercitados contra um workspace real.
-- Exercitar o executor real contra um cluster, um serviço de flags e uma DLQ de verdade.
-- Aprovação por Teams (hoje só Slack).
-- Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).
-- Detecção preditiva com PromQL (`predict_linear`) para abrir investigação antes do alerta.
-- Exercitar a retomada de investigações contra um Redis real (hoje testada com dublê).
+O que de fato falta (tudo o que está listado abaixo foi testado só contra dublês, emuladores locais ou dados inventados):
+
+- Exercitar o executor real contra um cluster Kubernetes, um serviço de feature flags e uma DLQ em Redis de verdade (ADR 0014). O contrato HTTP de flags (`GET/PUT /flags/{flag}`) é uma suposição documentada.
+- Exercitar o ChatOps contra um workspace Slack real (ADR 0019); aprovação por Teams não existe.
+- Exercitar a retomada de investigações e o anti-replay contra um Redis real (ADR 0018).
+- Validar as consultas `predict_linear` de `config/predictive-rules.yaml` contra um Prometheus com dados reais (ADR 0020); hoje só rodam em dublê.
+- Evals: o dataset tem 28 incidentes inventados e roda com modelo falso; falta medir com modelo real (`pnpm eval --model real`), incluir incidentes reais anonimizados e comparar modelos (custo × acerto).
+- Decisão pendente do autor: se `reset_consumer_offsets` entra na allowlist de `kafka-telemetry` (hoje fora, por escolha deliberada).

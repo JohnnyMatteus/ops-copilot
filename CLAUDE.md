@@ -44,6 +44,7 @@ src/
   incident/    investigador, prompt, schema do diagnóstico, aprovações
   executor/    porta, dry-run, executor real, allowlist de alvos e adaptadores (Kubernetes, flags, DLQ)
   chatops/     Slack: assinatura verificada, anti-replay, mapa de usuários e papéis, botões de aprovação
+  predictive/  regras predict_linear e detector que abre investigação antes do alerta
   rag/         recuperação lexical de runbooks Markdown (só informa o diagnóstico, sem autoridade)
   storage/     porta de objetos e adaptador S3 (MinIO/AWS)
   telemetry/   OpenTelemetry, métricas, logs, decorador do LLM
@@ -51,7 +52,7 @@ src/
   app.ts       raiz de composição; main.ts sobe o serviço
 playbooks/     um YAML por alerta
 runbooks/      Markdown de referência por playbook (ADR 0017)
-config/        autonomy-policy.yaml, executor-targets.yaml
+config/        autonomy-policy.yaml, executor-targets.yaml, predictive-rules.yaml
 evals/         dataset, respostas do modelo falso, harness e CLI
 deploy/        Prometheus (métricas sintéticas e alertas), Alertmanager, MinIO, gerador de traces
 tests/         unitários por módulo; tests/integration contra o compose

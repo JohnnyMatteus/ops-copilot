@@ -1,0 +1,30 @@
+# Detecção preditiva (ADR 0020): abre a investigação antes do alerta, quando a tendência linear dos
+# últimos 15 minutos cruza o limite do alerta real dentro de 30 minutos e o valor atual ainda não cruzou.
+# Cada regra aponta para um playbook existente; o gate e a política valem como em qualquer alerta.
+apiVersion: ops-copilot/v1
+kind: PredictiveRules
+rules:
+  - name: telemetry-consumer-lag-trend
+    alertname: TelemetryConsumerLagHigh
+    service: kafka-telemetry
+    summary: o lag do consumer group tende a passar de 10000 mensagens.
+    predict: 'sum by (service, consumergroup) (predict_linear(kafka_consumergroup_lag{service="kafka-telemetry"}[15m], 1800))'
+    current: 'sum by (service, consumergroup) (kafka_consumergroup_lag{service="kafka-telemetry"})'
+    threshold: 10000
+    horizon: 30m
+  - name: payments-dlq-trend
+    alertname: PaymentsDlqBacklogHigh
+    service: payments-events-go
+    summary: a DLQ de pagamentos tende a passar de 500 mensagens.
+    predict: 'sum by (service) (predict_linear(payments_dlq_messages{service="payments-events-go"}[15m], 1800))'
+    current: 'sum by (service) (payments_dlq_messages{service="payments-events-go"})'
+    threshold: 500
+    horizon: 30m
+  - name: saas-p99-trend
+    alertname: SaasP99LatencyHigh
+    service: saas-multitenant
+    summary: a latência p99 da API tende a passar de 1 segundo.
+    predict: 'max by (service) (predict_linear(saas:http_request_duration_seconds:p99{service="saas-multitenant"}[15m], 1800))'
+    current: 'max by (service) (saas:http_request_duration_seconds:p99{service="saas-multitenant"})'
+    threshold: 1
+    horizon: 30m

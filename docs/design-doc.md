@@ -26,7 +26,7 @@ O ops-copilot automatiza a investigação e propõe a ação. A tese central é 
 
 **Não-objetivos (nesta fundação)**
 
-- Executar ações de verdade em clusters ou filas. O executor é dry-run (ADR 0006).
+- Executar ações reais por padrão. O executor é dry-run (ADR 0006); o modo live (ADR 0014) exige configuração explícita e a allowlist de alvos.
 - Investigação livre de incidentes sem playbook (ADR 0009).
 - Interface de chat. As aprovações são via HTTP, e ChatOps vem depois.
 - Detecção de anomalias. O gatilho é sempre um alerta.
@@ -76,7 +76,7 @@ flowchart TB
 | `src/signals` | Portas e adaptadores de Prometheus e Jaeger, resumo para o prompt |
 | `src/graph` | Estado e etapas do grafo |
 | `src/incident` | Caso de uso de investigação, prompt, schema do diagnóstico e aprovações |
-| `src/executor` | Porta do executor e implementação dry-run |
+| `src/executor` | Porta do executor, dry-run, executor real com allowlist de alvos e adaptadores (Kubernetes, flags, DLQ) |
 | `src/storage` | Porta de armazenamento de objetos e adaptador S3 |
 | `src/telemetry` | Tracing, métricas, logs e decorador do LLM |
 | `src/http` | Servidor HTTP (somente `node:http`) |

@@ -24,6 +24,8 @@ import { RedisCheckpointSaver } from './graph/redis-checkpointer.js';
 import { InMemoryEffectGuard, RedisEffectGuard, type EffectGuard } from './incident/effects.js';
 import { InMemoryInvestigationJournal, RedisInvestigationJournal, type InvestigationJournal } from './incident/journal.js';
 import { createLlmClient } from './llm/factory.js';
+import { PredictiveDetector } from './predictive/detector.js';
+import { loadPredictiveRules } from './predictive/rules.js';
 import { loadRunbooks } from './rag/runbooks.js';
 import { loadPlaybooks } from './playbooks/registry.js';
 import { JaegerTraceSource } from './signals/jaeger.js';
@@ -56,6 +58,7 @@ export async function createApp(env: Env, logger: Logger) {
   const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
 
   const runbooks = env.RUNBOOKS_DIR ? await loadRunbooks(env.RUNBOOKS_DIR) : undefined;
+  const metricsSource = new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL });
   const investigator = new Investigator(
     {
       playbooks,
@@ -64,7 +67,7 @@ export async function createApp(env: Env, logger: Logger) {
       journal: state.journal,
       effects: state.effects,
       announcer: slack,
-      metricsSource: new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL }),
+      metricsSource,
       traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
       llm,
       model: env.LLM_MODEL,
@@ -121,6 +124,19 @@ export async function createApp(env: Env, logger: Logger) {
     webhookToken: env.WEBHOOK_TOKEN,
   });
 
+  const predictiveRules = env.PREDICTIVE_RULES_FILE ? await loadPredictiveRules(env.PREDICTIVE_RULES_FILE, playbooks) : [];
+  const detector = new PredictiveDetector({
+    rules: predictiveRules,
+    source: metricsSource,
+    investigate: (alert) => investigator.investigate(alert),
+    now: () => new Date(),
+    cooldown: state.cooldown,
+    onResult: (rule, result) => metrics.predictions.inc({ rule: rule.name, result }),
+    onError: (rule, error) => logger.error({ err: error, rule: rule.name }, 'falha na detecção preditiva'),
+  });
+  const predictTimer = setInterval(() => void detector.tick(), env.PREDICTIVE_INTERVAL_SECONDS * 1000);
+  predictTimer.unref();
+
   const resume = () =>
     investigator
       .resumeInterrupted((incidentId, error) => logger.error({ err: error, incidentId }, 'falha ao retomar investigação'))
@@ -135,6 +151,7 @@ export async function createApp(env: Env, logger: Logger) {
   logger.info(
     {
       runbooks: runbooks?.size ?? 0,
+      predictiveRules: predictiveRules.length,
       playbooks: playbooks.all.map((p) => `${p.metadata.id}@${p.metadata.version}`),
       executionMode: executor.mode,
       auditSink: env.AUDIT_SINK,
@@ -148,6 +165,7 @@ export async function createApp(env: Env, logger: Logger) {
     server,
     shutdown: async () => {
       clearInterval(resumeTimer);
+      clearInterval(predictTimer);
       await tracing.shutdown();
       await closeExecutor();
       await state.close();
@@ -163,6 +181,7 @@ interface StateAdapters {
   readonly journal: InvestigationJournal;
   readonly effects: EffectGuard;
   readonly replay: ReplayGuard;
+  readonly cooldown: ReplayGuard;
   close(): Promise<void>;
 }
 
@@ -178,6 +197,7 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
       journal: new InMemoryInvestigationJournal(),
       effects: new InMemoryEffectGuard(),
       replay: new InMemoryReplayGuard(),
+      cooldown: new InMemoryReplayGuard(),
       close: async () => undefined,
     };
   }
@@ -190,6 +210,7 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
     journal: new RedisInvestigationJournal(redis),
     effects: new RedisEffectGuard(redis),
     replay: new RedisReplayGuard(redis),
+    cooldown: new RedisReplayGuard(redis, 'ops-copilot:predictive:cooldown'),
     close: async () => {
       await redis.quit();
     },
