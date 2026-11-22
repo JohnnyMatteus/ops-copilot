@@ -7,7 +7,8 @@ import { Investigator } from '../../src/incident/investigator.js';
 import { FakeLlmClient } from '../../src/llm/fake.js';
 import { FixtureMetricsSource, FixtureTraceSource } from '../../src/signals/fixture.js';
 import { InstrumentedLlmClient } from '../../src/telemetry/instrumented-llm.js';
-import { PLANTONISTA, testDeps } from '../helpers/fixtures.js';
+import { ForbiddenError } from '../../src/auth/operator.js';
+import { LEITOR, PLANTONISTA, testDeps } from '../helpers/fixtures.js';
 import { alertFor, playbookById, realPolicy } from '../helpers/repo.js';
 import {
   diagnosis,
@@ -115,6 +116,25 @@ describe('grafo de investigação', () => {
     ]);
     // A aprovação é de uso único.
     expect(await service.resolve(report?.approvalId ?? '', PLANTONISTA, { approve: true })).toEqual({ status: 'not_found' });
+  });
+
+  it('leitor não aprova nem cancela: o pedido continua na fila', async () => {
+    const { deps, audit, gate, incidents, approvals } = await testDeps({
+      llm: new FakeLlmClient([]),
+      metricsSource: new FixtureMetricsSource({}),
+      traceSource: new FixtureTraceSource({}),
+    });
+    const pending = await approvals.request('inc-1', {
+      service: 'saas-multitenant',
+      playbook: await playbookById('saas-p99-latency'),
+      hypothesisId: 'noisy_tenant',
+      confidence: 1,
+      proposal: { actionId: 'notify_oncall', params: {} },
+    });
+    const service = new ApprovalService({ approvals, incidents, gate, executor: deps.executor, audit, metrics: deps.metrics });
+    await expect(service.resolve(pending.id, LEITOR, { approve: true })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(service.cancel('inc-1', LEITOR, 'teste')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await approvals.list()).toHaveLength(1);
   });
 
   it('aprovação expirada não executa', async () => {

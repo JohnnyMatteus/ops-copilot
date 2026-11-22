@@ -6,7 +6,8 @@ import type { IncidentReport } from '../../src/incident/investigator.js';
 import { RollbackService } from '../../src/incident/rollback-service.js';
 import { FakeLlmClient } from '../../src/llm/fake.js';
 import { FixtureMetricsSource, FixtureTraceSource } from '../../src/signals/fixture.js';
-import { LIDER, testDeps } from '../helpers/fixtures.js';
+import { ForbiddenError } from '../../src/auth/operator.js';
+import { LEITOR, LIDER, testDeps } from '../helpers/fixtures.js';
 import { realPolicy } from '../helpers/repo.js';
 
 const UNDO = { actionId: 'restore_deployment_replicas', params: { deployment: 'saas-api', replicas: 4, expectedCurrent: 6 } };
@@ -80,6 +81,14 @@ describe('rollback', () => {
 
     expect((await service.rollback(original.incidentId, LIDER, 'de novo')).status).toBe('already_rolled_back');
     expect(seen).toHaveLength(1);
+  });
+
+  it('leitor não reverte: nada é reservado nem executado', async () => {
+    const { service, incidents, seen } = await setup();
+    await incidents.save(report());
+    await expect(service.rollback(report().incidentId, LEITOR, 'tentativa')).rejects.toBeInstanceOf(ForbiddenError);
+    expect(seen).toEqual([]);
+    expect(await incidents.claimRollback(report().incidentId)).toBe(true);
   });
 
   it('kill switch bloqueia o rollback no gate, audita e libera a reserva', async () => {

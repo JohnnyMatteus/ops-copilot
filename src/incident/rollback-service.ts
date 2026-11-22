@@ -2,7 +2,7 @@
 // A inversa passa pelo gate (mesmas barreiras), exige um aprovador humano e é auditada.
 import type { AuditLog } from '../autonomy/audit.js';
 import type { AutonomyGate, Decision } from '../autonomy/gate.js';
-import type { Operator } from '../auth/operator.js';
+import { requireApprover, type Operator } from '../auth/operator.js';
 import type { ActionExecutor, ExecutionResult } from '../executor/executor.js';
 import type { CopilotMetrics } from '../telemetry/metrics.js';
 import type { IncidentRepository } from './incidents.js';
@@ -39,6 +39,7 @@ export class RollbackService {
   }
 
   async rollback(incidentId: string, operator: Operator, reason: string): Promise<RollbackOutcome> {
+    requireApprover(operator);
     const report = await this.#incidents.get(incidentId);
     if (!report) return { status: 'not_found' };
     const execution = report.execution ?? report.resolution?.execution ?? null;

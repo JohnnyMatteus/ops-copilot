@@ -15,9 +15,17 @@ describe('tokens de operador', () => {
     expect([...tokens.keys()]).toEqual(['a@example.com', 'b@example.com']);
   });
 
+  it('sem sufixo o papel é leitor; só :approver concede aprovação', async () => {
+    const tokens = parseOperatorTokens('a@example.com=aaaaaaaaaaaaaaaa:approver,b@example.com=bbbbbbbbbbbbbbbb,c@example.com=cccccccccccccccc:reader');
+    expect([...tokens.values()].map((credential) => credential.role)).toEqual(['approver', 'reader', 'reader']);
+    expect(tokens.get('a@example.com')?.token).toBe('aaaaaaaaaaaaaaaa');
+    const auth = new StaticTokenAuthenticator(tokens);
+    expect((await auth.authenticate('aaaaaaaaaaaaaaaa'))?.role).toBe('approver');
+  });
+
   it('identifica o operador pelo token e recusa token desconhecido', async () => {
     const auth = new StaticTokenAuthenticator(parseOperatorTokens('a@example.com=aaaaaaaaaaaaaaaa,b@example.com=bbbbbbbbbbbbbbbb'));
-    expect(await auth.authenticate('bbbbbbbbbbbbbbbb')).toEqual({ email: 'b@example.com', name: 'b', via: 'token' });
+    expect(await auth.authenticate('bbbbbbbbbbbbbbbb')).toEqual({ email: 'b@example.com', name: 'b', via: 'token', role: 'reader' });
     expect(await auth.authenticate('cccccccccccccccc')).toBeNull();
     expect(await auth.authenticate('')).toBeNull();
   });
@@ -41,7 +49,11 @@ describe('OIDC', () => {
   it('aceita access token válido e extrai e-mail e nome', async () => {
     const { authenticator, sign } = await setup();
     const token = await sign({ email: 'lider@example.com', name: 'Líder de Plantão' });
-    expect(await authenticator.authenticate(token)).toEqual({ email: 'lider@example.com', name: 'Líder de Plantão', via: 'oidc' });
+    expect(await authenticator.authenticate(token)).toEqual({ email: 'lider@example.com', name: 'Líder de Plantão', via: 'oidc', role: 'reader' });
+    const approver = await sign({ email: 'lider@example.com', realm_access: { roles: ['ops-copilot-approver'] } });
+    expect((await authenticator.authenticate(approver))?.role).toBe('approver');
+    const other = await sign({ email: 'lider@example.com', roles: ['admin'] });
+    expect((await authenticator.authenticate(other))?.role).toBe('reader');
   });
 
   it('recusa emissor, audiência, expiração e claims inválidos', async () => {

@@ -49,6 +49,7 @@ export async function createApp(env: Env, logger: Logger) {
     traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
     llm,
     model: env.LLM_MODEL,
+    maxLlmCostUsdPerIncident: env.LLM_MAX_COST_USD_PER_INCIDENT,
     gate,
     executor,
     approvals,
@@ -146,7 +147,7 @@ function createAuthenticator(env: Env): OperatorAuthenticator {
   const chain: OperatorAuthenticator[] = [];
   if (env.OPERATOR_TOKENS) chain.push(new StaticTokenAuthenticator(parseOperatorTokens(env.OPERATOR_TOKENS)));
   if (env.OIDC_ISSUER_URL) {
-    chain.push(new OidcAuthenticator({ issuer: env.OIDC_ISSUER_URL, audience: env.OIDC_AUDIENCE, jwksUrl: env.OIDC_JWKS_URL }));
+    chain.push(new OidcAuthenticator({ issuer: env.OIDC_ISSUER_URL, audience: env.OIDC_AUDIENCE, jwksUrl: env.OIDC_JWKS_URL, approverRole: env.OIDC_APPROVER_ROLE }));
   }
   return new ChainAuthenticator(chain);
 }

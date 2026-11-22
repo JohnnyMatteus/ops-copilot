@@ -75,7 +75,7 @@ make audit       # lista a trilha de auditoria no MinIO
 
 **Modo ecossistema.** `make up-portfolio` cria a rede `portfolio-net` e sobe só o núcleo, observando o Prometheus e o Jaeger dos outros projetos (`PORTFOLIO_PROMETHEUS_URL` e `PORTFOLIO_JAEGER_URL`).
 
-**Operadores e aprovação humana.** Cada pessoa tem um token (`OPERATOR_TOKENS`, ADR 0012) ou entra por OIDC; a identidade vem da credencial e assina a trilha. Recusar e cancelar exigem motivo (ADR 0013).
+**Operadores e aprovação humana.** Cada pessoa tem um token (`OPERATOR_TOKENS`, ADR 0012) ou entra por OIDC; a identidade vem da credencial e assina a trilha. Recusar e cancelar exigem motivo (ADR 0013). Há dois papéis (ADR 0016): leitor consulta; aprovador (`email=token:approver` ou o papel OIDC `ops-copilot-approver`) decide, cancela e reverte (ADR 0015), e a API responde 403 aos demais. `LLM_MAX_COST_USD_PER_INCIDENT` limita o custo de LLM de cada incidente.
 
 ```bash
 TOKEN=dev-only-operador-plantao   # plantonista@example.com no .env.example
@@ -171,7 +171,7 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 
 - `notify_oncall` em modo live ainda não tem adaptador de notificação (falha explícita).
 - Exercitar o executor real contra um cluster, um serviço de flags e uma DLQ de verdade.
-- Aprovação via ChatOps (Slack/Teams), papéis separados (leitor e aprovador) e um teto de custo de LLM por incidente.
+- Aprovação via ChatOps (Slack/Teams).
 - RAG sobre runbooks em Markdown para enriquecer a orientação dos playbooks.
 - Dataset de evals maior, com incidentes reais anonimizados, e comparação entre modelos (custo × acerto).
 - Detecção preditiva com PromQL (`predict_linear`) para abrir investigação antes do alerta.

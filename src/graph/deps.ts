@@ -16,6 +16,8 @@ export interface InvestigationDeps {
   readonly traceSource: TraceSource;
   readonly llm: LlmClient;
   readonly model: string;
+  /** Teto de custo de LLM por incidente, em dólares; `undefined` desliga o teto. */
+  readonly maxLlmCostUsdPerIncident?: number | undefined;
   readonly gate: AutonomyGate;
   readonly executor: ActionExecutor;
   readonly approvals: ApprovalQueue;

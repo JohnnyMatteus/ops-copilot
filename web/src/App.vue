@@ -75,7 +75,7 @@ const authenticated = computed(() => token.value !== null && route.name !== 'log
             <v-icon :icon="mdiMagnify" size="16" start />
             <kbd class="mono">⌘K</kbd>
           </v-btn>
-          <span v-if="me.data.value" class="mono medium d-none d-sm-inline" :title="`entrou por ${me.data.value.via}`">{{ me.data.value.email }}</span>
+          <span v-if="me.data.value" class="mono medium d-none d-sm-inline" :title="`entrou por ${me.data.value.via}`">{{ me.data.value.email }} · {{ me.data.value.role === 'approver' ? 'aprovador' : 'leitor' }}</span>
           <v-btn icon variant="text" size="small" aria-label="Alternar tema claro e escuro" @click="toggleTheme">
             <v-icon :icon="mdiBrightness6" size="18" />
           </v-btn>

@@ -23,6 +23,7 @@ export interface TestDepsOverrides {
   readonly policy?: AutonomyPolicy;
   readonly executor?: ActionExecutor;
   readonly budget?: ActionBudget;
+  readonly maxLlmCostUsdPerIncident?: number;
 }
 
 export async function testDeps(overrides: TestDepsOverrides) {
@@ -40,6 +41,7 @@ export async function testDeps(overrides: TestDepsOverrides) {
     traceSource: overrides.traceSource,
     llm: overrides.llm,
     model: 'fake-model',
+    maxLlmCostUsdPerIncident: overrides.maxLlmCostUsdPerIncident,
     gate,
     executor: overrides.executor ?? new DryRunExecutor(),
     approvals,
@@ -52,5 +54,6 @@ export async function testDeps(overrides: TestDepsOverrides) {
   return { deps, spans, audit, approvals, incidents, metrics, gate, budget };
 }
 
-export const PLANTONISTA: Operator = { email: 'plantonista@example.com', name: 'plantonista', via: 'token' };
-export const LIDER: Operator = { email: 'lider@example.com', name: 'lider', via: 'token' };
+export const PLANTONISTA: Operator = { email: 'plantonista@example.com', name: 'plantonista', via: 'token', role: 'approver' };
+export const LIDER: Operator = { email: 'lider@example.com', name: 'lider', via: 'token', role: 'approver' };
+export const LEITOR: Operator = { email: 'leitor@example.com', name: 'leitor', via: 'token', role: 'reader' };
