@@ -6,12 +6,15 @@ import type { Alert } from '../domain/alert.js';
 import type { ExecutionResult } from '../executor/executor.js';
 import type { InvestigationDeps } from '../graph/deps.js';
 import { buildInvestigationGraph, type InvestigationGraph } from '../graph/graph.js';
+import { EFFECT_ALREADY_RESERVED } from '../graph/nodes/act.js';
+import { EMPTY_USAGE } from '../llm/structured.js';
 import type { InvestigationStateType, Outcome, StepRecord } from '../graph/state.js';
 import type { Signal } from '../signals/types.js';
 import type { LlmUsage } from '../llm/structured.js';
 import { withSpan } from '../telemetry/tracing.js';
 import type { Diagnosis } from './diagnosis.js';
 import type { Resolution, RollbackRecord } from './incidents.js';
+import { InMemoryEffectGuard, type EffectGuard } from './effects.js';
 import { InMemoryInvestigationJournal, type InFlight, type InvestigationJournal } from './journal.js';
 
 export interface IncidentReport {
@@ -43,6 +46,24 @@ export interface IncidentReport {
   readonly finishedAt: string;
 }
 
+const DEFAULT_LEASE_MS = 30_000;
+const INTERRUPTED_AT_ACT =
+  'Investigação interrompida na etapa de ação; a ação pode já ter ocorrido e não foi repetida. Verifique manualmente.';
+
+/** Estado mínimo para encerrar como interrompida uma investigação sem checkpoint legível. */
+const EMPTY_STATE = {
+  playbook: null,
+  signals: [],
+  diagnosis: null,
+  decision: null,
+  execution: null,
+  approvalId: null,
+  approvalExpiresAt: null,
+  llmUsage: EMPTY_USAGE,
+  steps: [],
+  timeline: [],
+};
+
 const threadOf = (incidentId: string) => ({ configurable: { thread_id: incidentId } });
 
 const DEDUP_TTL_MS = 6 * 60 * 60 * 1000;
@@ -56,11 +77,18 @@ export class Investigator {
   readonly #journal: InvestigationJournal;
   readonly #checkpointer: BaseCheckpointSaver;
 
-  constructor(deps: InvestigationDeps) {
+  readonly #effects: EffectGuard;
+  readonly #leaseMs: number;
+  readonly #maxResumeAttempts: number;
+
+  constructor(deps: InvestigationDeps, options: { leaseMs?: number; maxResumeAttempts?: number } = {}) {
     this.#deps = deps;
     this.#journal = deps.journal ?? new InMemoryInvestigationJournal();
     this.#checkpointer = deps.checkpointer ?? new MemorySaver();
-    this.#graph = buildInvestigationGraph({ ...deps, checkpointer: this.#checkpointer });
+    this.#effects = deps.effects ?? new InMemoryEffectGuard();
+    this.#leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+    this.#maxResumeAttempts = options.maxResumeAttempts ?? 3;
+    this.#graph = buildInvestigationGraph({ ...deps, checkpointer: this.#checkpointer, effects: this.#effects });
   }
 
   /** Devolve `null` quando o alerta é repetição de uma ocorrência já investigada. */
@@ -69,25 +97,66 @@ export class Investigator {
     const incidentId = randomUUID();
     const startedAt = this.#deps.now().toISOString();
     await this.#journal.begin({ incidentId, alert, startedAt });
-    return this.#run(incidentId, alert, startedAt, () => this.#graph.invoke({ incidentId, alert }, threadOf(incidentId)));
+    return this.#leased(incidentId, () =>
+      this.#run(incidentId, alert, startedAt, () => this.#graph.invoke({ incidentId, alert }, threadOf(incidentId))),
+    );
   }
 
   /**
-   * Retoma as investigações que ficaram sem relatório (processo caiu no meio, ADR 0018). Só toca
-   * as mais velhas que `staleAfterMs`, para não disputar com uma investigação viva, e cada uma é
-   * reservada por um único processo.
+   * Retoma as investigações sem relatório (processo caiu no meio, ADR 0018). Quem detém o lease
+   * está vivo e é deixado em paz, inclusive neste mesmo processo; só o lease expirado ou liberado
+   * permite a retomada. Cada entrada é isolada: uma que falha não bloqueia as demais, e depois de
+   * `maxResumeAttempts` ela termina como `interrupted`, auditada.
    */
-  async resumeInterrupted(staleAfterMs: number): Promise<IncidentReport[]> {
-    const now = this.#deps.now().getTime();
+  async resumeInterrupted(onError: (incidentId: string, error: unknown) => void = () => undefined): Promise<IncidentReport[]> {
     const resumed: IncidentReport[] = [];
-    for (const entry of await this.#journal.stale(staleAfterMs, now)) {
-      if (!(await this.#journal.claim(entry.incidentId, Math.max(staleAfterMs, 60_000)))) continue;
-      resumed.push(await this.#resume(entry));
+    for (const entry of await this.#journal.pending()) {
+      const report = await this.#leased(
+        entry.incidentId,
+        async () => {
+          try {
+            // Terminou entre a leitura da lista e o lease: nada a retomar.
+            if (await this.#deps.incidents.get(entry.incidentId)) {
+              await this.#journal.finish(entry.incidentId);
+              return null;
+            }
+            const attempts = await this.#journal.bumpAttempts(entry.incidentId);
+            if (attempts > this.#maxResumeAttempts) return await this.#abandon(entry, `${String(this.#maxResumeAttempts)} tentativas de retomada falharam`);
+            return await this.#resume(entry);
+          } catch (error) {
+            onError(entry.incidentId, error);
+            return null;
+          }
+        },
+        true,
+      ).catch((error: unknown) => {
+        onError(entry.incidentId, error);
+        return null;
+      });
+      if (report) resumed.push(report);
     }
     return resumed;
   }
 
-  async #resume(entry: InFlight): Promise<IncidentReport> {
+  /**
+   * Executa `work` com o lease da investigação, renovado por heartbeat enquanto roda. Com
+   * `onlyIfFree`, devolve `null` sem trabalhar se outro detém o lease.
+   */
+  async #leased<T>(incidentId: string, work: () => Promise<T>, onlyIfFree = false): Promise<T | null> {
+    const owner = randomUUID();
+    const acquired = await this.#journal.acquire(incidentId, owner, this.#leaseMs);
+    if (!acquired && onlyIfFree) return null;
+    const timer = setInterval(() => void this.#journal.renew(incidentId, owner, this.#leaseMs).catch(() => false), Math.max(Math.floor(this.#leaseMs / 3), 5));
+    timer.unref();
+    try {
+      return await work();
+    } finally {
+      clearInterval(timer);
+      await this.#journal.release(incidentId, owner).catch(() => undefined);
+    }
+  }
+
+  async #resume(entry: InFlight): Promise<IncidentReport | null> {
     const { incidentId, alert, startedAt } = entry;
     const config = threadOf(incidentId);
     const snapshot = await this.#graph.getState(config);
@@ -104,18 +173,33 @@ export class Investigator {
       return this.#run(incidentId, alert, startedAt, async () => snapshot.values as InvestigationStateType);
     }
     if (next === 'act' && !(await this.#safeToRepeatAct(incidentId, values))) {
-      const failure = 'Investigação interrompida na etapa de ação; a ação pode já ter ocorrido e não foi repetida. Verifique manualmente.';
       await this.#audit(incidentId, 'investigation_interrupted', { at: 'act', verdict: values.decision?.verdict ?? null });
-      return this.#run(incidentId, alert, startedAt, async () => ({ ...(snapshot.values as InvestigationStateType), outcome: 'interrupted', failure }));
+      return this.#run(incidentId, alert, startedAt, async () => ({ ...(snapshot.values as InvestigationStateType), outcome: 'interrupted', failure: INTERRUPTED_AT_ACT }));
     }
     await this.#audit(incidentId, 'investigation_resumed', { from: next });
     return this.#run(incidentId, alert, startedAt, () => this.#graph.invoke(null, config));
   }
 
+  /** Encerra uma investigação que não consegue ser retomada, sem tentar o grafo de novo. */
+  async #abandon(entry: InFlight, reason: string): Promise<IncidentReport | null> {
+    const { incidentId, alert, startedAt } = entry;
+    await this.#audit(incidentId, 'investigation_interrupted', { reason });
+    const known = await this.#graph.getState(threadOf(incidentId)).then((snapshot) => snapshot.values as Partial<InvestigationStateType>).catch(() => ({}));
+    const state = {
+      ...EMPTY_STATE,
+      ...known,
+      incidentId,
+      alert,
+      outcome: 'interrupted',
+      failure: `Investigação interrompida: ${reason}. Verifique manualmente.`,
+    } as InvestigationStateType;
+    return this.#run(incidentId, alert, startedAt, async () => state);
+  }
+
   /**
    * Repetir a etapa `act` só é seguro se ela não tem efeito antes do registro: veredito sem execução,
    * ou pedido de aprovação que ainda não foi aberto. Execução automática nunca é repetida: o
-   * executor pode ter agido antes da queda.
+   * executor pode ter agido antes da queda. (A reserva de efeito é a barreira independente.)
    */
   async #safeToRepeatAct(incidentId: string, values: Partial<InvestigationStateType>): Promise<boolean> {
     const verdict = values.decision?.verdict;
@@ -137,7 +221,7 @@ export class Investigator {
     alert: Alert,
     startedAt: string,
     execute: () => Promise<InvestigationStateType>,
-  ): Promise<IncidentReport> {
+  ): Promise<IncidentReport | null> {
     return withSpan(
       this.#deps.tracer,
       'ops_copilot.investigate',
@@ -148,6 +232,8 @@ export class Investigator {
       },
       async (set) => {
         const state = await execute();
+        // Perdeu a corrida pelo efeito: o relatório de quem agiu prevalece e este não o sobrescreve.
+        if (state.failure === EFFECT_ALREADY_RESERVED && (await this.#deps.incidents.get(incidentId))) return null;
         const outcome = state.outcome ?? 'no_action';
         set({
           'ops_copilot.outcome': outcome,

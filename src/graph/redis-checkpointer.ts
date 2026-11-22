@@ -57,9 +57,15 @@ export class RedisCheckpointSaver extends MemorySaver {
     await this.#redis.del(this.#key(threadId));
   }
 
+  /**
+   * Leitura "do último" (sem checkpoint_id, como na retomada) sempre relê o Redis: outro processo
+   * pode ter avançado a thread. Leituras de um checkpoint específico usam o cache.
+   */
   async #hydrate(config: RunnableConfig): Promise<void> {
     const threadId = config.configurable?.['thread_id'] as string | undefined;
-    if (threadId === undefined || this.#loaded.has(threadId)) return;
+    if (threadId === undefined) return;
+    const latest = config.configurable?.['checkpoint_id'] === undefined;
+    if (!latest && this.#loaded.has(threadId)) return;
     const raw = await this.#redis.get(this.#key(threadId));
     if (raw !== null) {
       const snapshot = JSON.parse(raw, reviver) as Snapshot;
