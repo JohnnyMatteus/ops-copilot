@@ -6,6 +6,7 @@ import type { ActionExecutor } from '../executor/executor.js';
 import type { ApprovalQueue } from '../incident/approvals.js';
 import type { IncidentRepository } from '../incident/incidents.js';
 import type { LlmClient } from '../llm/client.js';
+import type { RunbookRetriever } from '../rag/runbooks.js';
 import type { PlaybookRegistry } from '../playbooks/registry.js';
 import type { MetricsSource, TraceSource } from '../signals/types.js';
 import type { CopilotMetrics } from '../telemetry/metrics.js';
@@ -16,6 +17,8 @@ export interface InvestigationDeps {
   readonly traceSource: TraceSource;
   readonly llm: LlmClient;
   readonly model: string;
+  /** Runbooks recuperados para o prompt do diagnóstico; só informam, nunca autorizam. */
+  readonly runbooks?: RunbookRetriever | undefined;
   /** Teto de custo de LLM por incidente, em dólares; `undefined` desliga o teto. */
   readonly maxLlmCostUsdPerIncident?: number | undefined;
   readonly gate: AutonomyGate;

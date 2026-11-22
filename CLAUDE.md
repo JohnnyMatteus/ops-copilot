@@ -43,11 +43,13 @@ src/
   graph/       estado e etapas do LangGraph (triage, collect, diagnose, decide, act)
   incident/    investigador, prompt, schema do diagnóstico, aprovações
   executor/    porta, dry-run, executor real, allowlist de alvos e adaptadores (Kubernetes, flags, DLQ)
+  rag/         recuperação lexical de runbooks Markdown (só informa o diagnóstico, sem autoridade)
   storage/     porta de objetos e adaptador S3 (MinIO/AWS)
   telemetry/   OpenTelemetry, métricas, logs, decorador do LLM
   http/        webhook, aprovações, /metrics, /healthz
   app.ts       raiz de composição; main.ts sobe o serviço
 playbooks/     um YAML por alerta
+runbooks/      Markdown de referência por playbook (ADR 0017)
 config/        autonomy-policy.yaml, executor-targets.yaml
 evals/         dataset, respostas do modelo falso, harness e CLI
 deploy/        Prometheus (métricas sintéticas e alertas), Alertmanager, MinIO, gerador de traces

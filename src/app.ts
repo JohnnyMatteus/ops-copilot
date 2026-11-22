@@ -16,6 +16,7 @@ import { Investigator } from './incident/investigator.js';
 import { RedisApprovalQueue } from './incident/redis-approvals.js';
 import { RedisIncidentRepository } from './incident/redis-incidents.js';
 import { createLlmClient } from './llm/factory.js';
+import { loadRunbooks } from './rag/runbooks.js';
 import { loadPlaybooks } from './playbooks/registry.js';
 import { JaegerTraceSource } from './signals/jaeger.js';
 import { connectRedis } from './storage/redis.js';
@@ -43,8 +44,10 @@ export async function createApp(env: Env, logger: Logger) {
   metrics.observePendingApprovals(async () => (await approvals.list()).length);
   const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
 
+  const runbooks = env.RUNBOOKS_DIR ? await loadRunbooks(env.RUNBOOKS_DIR) : undefined;
   const investigator = new Investigator({
     playbooks,
+    runbooks,
     metricsSource: new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL }),
     traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
     llm,
@@ -94,6 +97,7 @@ export async function createApp(env: Env, logger: Logger) {
 
   logger.info(
     {
+      runbooks: runbooks?.size ?? 0,
       playbooks: playbooks.all.map((p) => `${p.metadata.id}@${p.metadata.version}`),
       executionMode: executor.mode,
       auditSink: env.AUDIT_SINK,
