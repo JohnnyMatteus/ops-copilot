@@ -32,6 +32,8 @@ export const EvalCaseSchema = z.strictObject({
     alertname: z.string().min(1),
     service: z.string().min(1),
     labels: z.record(z.string(), z.string()).default({}),
+    /** Anotações extras do alerta (ex.: `predicted: 'true'` nos casos de detecção preditiva). */
+    annotations: z.record(z.string(), z.string()).default({}),
   }),
   metrics: z.record(z.string(), z.array(SeriesFixtureSchema)),
   traces: z.record(z.string(), z.array(TraceSummarySchema)),
@@ -127,7 +129,7 @@ export async function runEvals(options: EvalOptions): Promise<EvalReport> {
       severity: 'critical',
       startsAt: now.toISOString(),
       labels: { alertname: evalCase.alert.alertname, service: evalCase.alert.service, ...evalCase.alert.labels },
-      annotations: { summary: evalCase.description },
+      annotations: { summary: evalCase.description, ...evalCase.alert.annotations },
     });
     if (!report) throw new Error(`Caso ${evalCase.id} tratado como duplicado.`);
 

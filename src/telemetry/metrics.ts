@@ -12,6 +12,7 @@ export class CopilotMetrics {
   readonly nodeDuration: Histogram<'node'>;
   readonly approvals: Counter<'service' | 'outcome'>;
   readonly rollbacks: Counter<'service' | 'outcome'>;
+  readonly predictions: Counter<'rule' | 'result'>;
 
   constructor(registry: Registry = new Registry()) {
     this.registry = registry;
@@ -63,6 +64,12 @@ export class CopilotMetrics {
       name: 'ops_copilot_approvals_total',
       help: 'Pedidos de aprovação resolvidos por humanos, por desfecho.',
       labelNames: ['service', 'outcome'],
+      registers,
+    });
+    this.predictions = new Counter({
+      name: 'ops_copilot_predictions_total',
+      help: 'Avaliações das regras preditivas, por resultado.',
+      labelNames: ['rule', 'result'],
       registers,
     });
     this.rollbacks = new Counter({

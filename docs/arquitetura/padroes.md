@@ -13,6 +13,8 @@ O domínio (gate, grafo, casos de uso) depende de interfaces. Os adaptadores con
 | [`ApprovalAnnouncer` / `NotifierPort`](../../src/chatops/slack-client.ts) | `SlackClient` |
 | [`ReplayGuard`](../../src/chatops/signature.ts) | Redis (`SET NX`), em memória |
 | [`RunbookRetriever`](../../src/rag/runbooks.ts) | MiniSearch (BM25) em memória |
+| [`InvestigationJournal`](../../src/incident/journal.ts), [`EffectGuard`](../../src/incident/effects.ts) | Redis (lease com dono, `SET NX`), em memória |
+| `BaseCheckpointSaver` (LangGraph) | [`RedisCheckpointSaver`](../../src/graph/redis-checkpointer.ts), `MemorySaver` |
 | [`ObjectStore`](../../src/storage/object-store.ts#L3) | S3/MinIO, em memória |
 | [`AuditLog`](../../src/autonomy/audit.ts#L40) | S3 com object lock, arquivo JSONL, em memória |
 | [`ActionBudget`](../../src/autonomy/budget.ts#L7) | [Redis](../../src/autonomy/redis-budget.ts#L15), [em memória](../../src/autonomy/budget.ts#L13) |
@@ -46,6 +48,21 @@ O executor ([`ActionExecutor`](../../src/executor/executor.ts#L22)) e o cliente 
 [`InstrumentedLlmClient`](../../src/telemetry/instrumented-llm.ts#L8) implementa `LlmClient` e envolve outro `LlmClient` com span e métricas de tokens/custo. [`instrument`](../../src/graph/graph.ts#L19) faz o mesmo para cada etapa do grafo (span, histograma, registro da etapa percorrida).
 - **Resolve:** observabilidade sem misturar telemetria com a lógica do diagnóstico ou das etapas.
 - **Trade-off:** a ordem dos decoradores importa e não é verificada pelo tipo.
+
+### Decorator (teto de custo)
+[`CostCappedLlmClient`](../../src/llm/cost-cap.ts) envolve um `LlmClient` por incidente e recusa a chamada seguinte ao atingir o teto; custo desconhecido falha fechado.
+- **Resolve:** o limite de gasto é código, fora do prompt e fora do nó de diagnóstico.
+- **Trade-off:** com provedor que não informa custo, o retry de schema fica bloqueado.
+
+### Allowlist deny-by-default
+[`TargetAllowlist`](../../src/executor/targets.ts) e as inversas do [`catálogo`](../../src/autonomy/catalog.ts) (`INVERSE_ACTION_IDS`) dizem onde o executor pode agir e o que só o rollback executa, independentemente do gate.
+- **Resolve:** duas camadas: o gate decide "pode", a allowlist decide "onde".
+- **Trade-off:** mais um arquivo versionado para manter em dia com os playbooks.
+
+### Lease com heartbeat e barreira idempotente
+O diário de investigações usa lease com dono renovado por heartbeat; `act` ainda reserva o efeito por incidente (`SET NX`, nunca devolvida).
+- **Resolve:** nenhuma investigação viva é retomada e, mesmo com o lease burlado, o efeito acontece uma vez.
+- **Trade-off:** na dúvida o incidente termina `interrupted`, para verificação humana.
 
 ### Template Method
 [`ChainedAuditLog`](../../src/autonomy/audit.ts#L64) implementa o encadeamento por hash e a serialização das escritas; as subclasses só fornecem [`write`](../../src/autonomy/audit.ts#L98) e `records` (memória, JSONL, [S3](../../src/autonomy/audit.ts#L170)).
