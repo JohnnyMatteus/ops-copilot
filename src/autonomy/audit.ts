@@ -20,7 +20,9 @@ export const AuditEventSchema = z.enum([
   'approval_granted',
   'approval_rejected',
   'incident_cancelled',
+  'rollback_granted',
   'rollback_executed',
+  'rollback_dry_run',
   'rollback_failed',
   'rollback_blocked',
 ]);

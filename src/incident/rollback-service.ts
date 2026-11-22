@@ -9,7 +9,7 @@ import type { IncidentRepository } from './incidents.js';
 
 export type RollbackOutcome =
   | { readonly status: 'rolled_back'; readonly execution: ExecutionResult }
-  | { readonly status: 'failed'; readonly execution: ExecutionResult }
+  | { readonly status: 'failed' | 'dry_run'; readonly execution: ExecutionResult }
   | { readonly status: 'blocked'; readonly decision: Decision }
   | { readonly status: 'not_found' }
   | { readonly status: 'not_reversible' | 'already_rolled_back'; readonly reason: string };
@@ -50,41 +50,64 @@ export class RollbackService {
     }
 
     const actor = `human:${operator.email}`;
-    const decision = this.#gate.authorizeRollback({
-      service: report.service,
-      originalActionId: execution.actionId,
-      undo: execution.undo,
-    });
-    if (decision.verdict === 'blocked' || !decision.action) {
-      await this.#incidents.releaseRollback(incidentId);
+    // A reserva só fica com quem de fato mudou o estado: qualquer saída antes disso a devolve.
+    let mutated = false;
+    try {
+      const decision = this.#gate.authorizeRollback({
+        service: report.service,
+        originalActionId: execution.actionId,
+        undo: execution.undo,
+      });
+      if (decision.verdict === 'blocked' || !decision.action) {
+        await this.#incidents.releaseRollback(incidentId);
+        await this.#audit.append({
+          incidentId,
+          event: 'rollback_blocked',
+          actor: 'copilot',
+          details: { requestedBy: operator.email, reasons: decision.reasons },
+        });
+        this.#metrics.rollbacks.inc({ service: report.service, outcome: 'blocked' });
+        return { status: 'blocked', decision };
+      }
+
+      // Falha fechado: sem registro de quem mandou, o cluster não é tocado.
       await this.#audit.append({
         incidentId,
-        event: 'rollback_blocked',
-        actor: 'copilot',
-        details: { requestedBy: operator.email, reasons: decision.reasons },
+        event: 'rollback_granted',
+        actor,
+        details: { reason, original: execution.actionId, undo: decision.action.id, via: operator.via },
       });
-      this.#metrics.rollbacks.inc({ service: report.service, outcome: 'blocked' });
-      return { status: 'blocked', decision };
-    }
 
-    const action = decision.action;
-    const result: ExecutionResult = await this.#executor
-      .execute(action, { incidentId, service: report.service, authorizedBy: actor })
-      .catch((error: unknown) => ({ status: 'failed', actionId: action.id, detail: (error as Error).message }));
-    const failed = result.status === 'failed';
-    await this.#audit.append({
-      incidentId,
-      event: failed ? 'rollback_failed' : 'rollback_executed',
-      actor,
-      details: { ...result, reason, original: execution.actionId, via: operator.via, mode: this.#executor.mode },
-    });
-    await this.#incidents.save({
-      ...report,
-      rollback: { by: operator.email, reason, at: this.#now().toISOString(), execution: result },
-    });
-    // Falha real do executor libera nova tentativa; o gate já autorizou a mesma inversa.
-    if (failed) await this.#incidents.releaseRollback(incidentId);
-    this.#metrics.rollbacks.inc({ service: report.service, outcome: failed ? 'failed' : 'executed' });
-    return failed ? { status: 'failed', execution: result } : { status: 'rolled_back', execution: result };
+      const action = decision.action;
+      const result: ExecutionResult = await this.#executor
+        .execute(action, { incidentId, service: report.service, authorizedBy: actor })
+        .catch((error: unknown) => ({ status: 'failed', actionId: action.id, detail: (error as Error).message }));
+      mutated = result.status === 'executed';
+      const details = { ...result, reason, original: execution.actionId, via: operator.via, mode: this.#executor.mode };
+
+      if (result.status === 'dry_run') {
+        // Executor em dry-run (processo reiniciado sem live): nada mudou, então nada foi revertido.
+        await this.#incidents.releaseRollback(incidentId);
+        await this.#audit.append({ incidentId, event: 'rollback_dry_run', actor, details });
+        this.#metrics.rollbacks.inc({ service: report.service, outcome: 'dry_run' });
+        return { status: 'dry_run', execution: result };
+      }
+      if (result.status === 'failed') {
+        await this.#incidents.releaseRollback(incidentId);
+        await this.#audit.append({ incidentId, event: 'rollback_failed', actor, details });
+        this.#metrics.rollbacks.inc({ service: report.service, outcome: 'failed' });
+        return { status: 'failed', execution: result };
+      }
+      await this.#incidents.save({
+        ...report,
+        rollback: { by: operator.email, reason, at: this.#now().toISOString(), execution: result },
+      });
+      await this.#audit.append({ incidentId, event: 'rollback_executed', actor, details });
+      this.#metrics.rollbacks.inc({ service: report.service, outcome: 'executed' });
+      return { status: 'rolled_back', execution: result };
+    } catch (error) {
+      if (!mutated) await this.#incidents.releaseRollback(incidentId).catch(() => undefined);
+      throw error;
+    }
   }
 }

@@ -162,8 +162,17 @@ export function createHttpServer(deps: ServerDeps): Server {
       const body = CancelBodySchema.safeParse(await readJson(req));
       if (!body.success) throw new HttpError(400, 'Corpo esperado: {"reason": motivo}.');
       const outcome = await deps.rollbackService.rollback(rollbackMatch[1], operator, body.data.reason);
-      const status = { rolled_back: 200, failed: 502, blocked: 409, not_found: 404, not_reversible: 409, already_rolled_back: 409 }[outcome.status];
-      return json(res, status, outcome);
+      const status = { rolled_back: 200, failed: 502, dry_run: 409, blocked: 409, not_found: 404, not_reversible: 409, already_rolled_back: 409 }[outcome.status];
+      const error = {
+        rolled_back: null,
+        dry_run: 'O copiloto está em dry-run: nada foi alterado, o rollback não foi aplicado.',
+        failed: outcome.status === 'failed' ? `O rollback falhou: ${outcome.execution.detail}` : null,
+        blocked: outcome.status === 'blocked' ? `Bloqueado pelo gate: ${outcome.decision.reasons.join(' ')}` : null,
+        not_found: 'Incidente não encontrado.',
+        not_reversible: 'reason' in outcome ? outcome.reason : null,
+        already_rolled_back: 'reason' in outcome ? outcome.reason : null,
+      }[outcome.status];
+      return json(res, status, error ? { ...outcome, error } : outcome);
     }
 
     if (req.method === 'GET' && url.pathname === '/incidents') {

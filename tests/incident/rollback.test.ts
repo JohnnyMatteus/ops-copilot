@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AuditLog } from '../../src/autonomy/audit.js';
 import type { ApprovedAction } from '../../src/autonomy/gate.js';
 import type { ActionExecutor, ExecutionResult } from '../../src/executor/executor.js';
 import type { IncidentReport } from '../../src/incident/investigator.js';
@@ -36,7 +37,9 @@ const report = (overrides: Partial<IncidentReport> = {}): IncidentReport => ({
   ...overrides,
 });
 
-async function setup(options: { policy?: Awaited<ReturnType<typeof realPolicy>>; outcome?: ExecutionResult['status'] } = {}) {
+async function setup(
+  options: { policy?: Awaited<ReturnType<typeof realPolicy>>; outcome?: ExecutionResult['status']; failAuditOn?: string } = {},
+) {
   const base = await testDeps({
     llm: new FakeLlmClient([]),
     metricsSource: new FixtureMetricsSource({}),
@@ -51,7 +54,13 @@ async function setup(options: { policy?: Awaited<ReturnType<typeof realPolicy>>;
       return { status: options.outcome ?? 'executed', actionId: action.id, detail: 'ok' };
     },
   };
-  const service = new RollbackService({ ...base, executor, now: () => new Date('2026-11-20T13:00:00Z') });
+  const audit: AuditLog = options.failAuditOn
+    ? {
+        records: () => base.audit.records(),
+        append: (entry) => (entry.event === options.failAuditOn ? Promise.reject(new Error('S3 fora do ar')) : base.audit.append(entry)),
+      }
+    : base.audit;
+  const service = new RollbackService({ ...base, audit, executor, now: () => new Date('2026-11-20T13:00:00Z') });
   return { ...base, service, seen };
 }
 
@@ -65,7 +74,8 @@ describe('rollback', () => {
     expect(outcome.status).toBe('rolled_back');
     expect(seen).toEqual([{ id: 'restore_deployment_replicas', params: UNDO.params, reversible: true }]);
     const records = await audit.records();
-    expect(records.at(-1)).toMatchObject({ event: 'rollback_executed', actor: 'human:lider@example.com' });
+    expect(records.map((record) => record.event)).toEqual(['rollback_granted', 'rollback_executed']);
+    expect(records.at(-1)).toMatchObject({ actor: 'human:lider@example.com' });
     expect((await incidents.get(original.incidentId))?.rollback).toMatchObject({ by: 'lider@example.com', reason: 'latência voltou ao normal' });
 
     expect((await service.rollback(original.incidentId, LIDER, 'de novo')).status).toBe('already_rolled_back');
@@ -116,11 +126,38 @@ describe('rollback', () => {
     expect((await service.rollback('a1b2c3d4-0000-4000-8000-0000000000ff', LIDER, 'tentativa')).status).toBe('not_found');
   });
 
+  it('sem conseguir gravar rollback_granted, não executa e devolve a reserva', async () => {
+    const { service, incidents, seen } = await setup({ failAuditOn: 'rollback_granted' });
+    await incidents.save(report());
+    await expect(service.rollback(report().incidentId, LIDER, 'tentativa')).rejects.toThrow(/S3/);
+    expect(seen).toEqual([]);
+    expect(await incidents.claimRollback(report().incidentId)).toBe(true);
+  });
+
+  it('executor em dry-run não conta como revertido: status próprio, nada salvo e reserva devolvida', async () => {
+    const { service, incidents, audit } = await setup({ outcome: 'dry_run' });
+    await incidents.save(report());
+    const outcome = await service.rollback(report().incidentId, LIDER, 'tentativa');
+    expect(outcome.status).toBe('dry_run');
+    expect((await audit.records()).map((record) => record.event)).toEqual(['rollback_granted', 'rollback_dry_run']);
+    expect((await incidents.get(report().incidentId))?.rollback ?? null).toBeNull();
+    expect(await incidents.claimRollback(report().incidentId)).toBe(true);
+  });
+
+  it('exceção depois de executar com sucesso mantém a reserva: o estado já mudou', async () => {
+    const { service, incidents, seen } = await setup({ failAuditOn: 'rollback_executed' });
+    await incidents.save(report());
+    await expect(service.rollback(report().incidentId, LIDER, 'tentativa')).rejects.toThrow(/S3/);
+    expect(seen).toHaveLength(1);
+    expect(await incidents.claimRollback(report().incidentId)).toBe(false);
+  });
+
   it('falha do executor é auditada e libera nova tentativa', async () => {
     const { service, incidents, audit } = await setup({ outcome: 'failed' });
     await incidents.save(report());
     expect((await service.rollback(report().incidentId, LIDER, 'tentativa')).status).toBe('failed');
     expect((await audit.records()).at(-1)?.event).toBe('rollback_failed');
+    expect((await incidents.get(report().incidentId))?.rollback ?? null).toBeNull();
     expect(await incidents.claimRollback(report().incidentId)).toBe(true);
   });
 });
