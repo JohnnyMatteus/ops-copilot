@@ -10,6 +10,7 @@ import GateTape from '@/components/signature/GateTape.vue';
 import Sparkline from '@/components/signature/Sparkline.vue';
 import VerdictStamp from '@/components/signature/VerdictStamp.vue';
 import DecisionPanel from '@/components/DecisionPanel.vue';
+import RollbackPanel from '@/components/RollbackPanel.vue';
 import { ApiError } from '@/api/client';
 import { useClock } from '@/composables/useClock';
 import { dateTime, duration, percent } from '@/domain/format';
@@ -39,6 +40,11 @@ const traceLink = computed(() => {
   if (!base || !data.value) return null;
   const tags = encodeURIComponent(JSON.stringify({ 'ops_copilot.incident_id': data.value.incidentId }));
   return `${base}/search?service=ops-copilot&tags=${tags}`;
+});
+
+const undo = computed(() => {
+  const execution = data.value?.execution ?? data.value?.resolution?.execution;
+  return execution?.status === 'executed' && execution.undo ? execution.undo : null;
 });
 
 const notFound = computed(() => incident.error.value instanceof ApiError && incident.error.value.status === 404);
@@ -175,6 +181,18 @@ function describe(signal: Signal): string {
                 </p>
                 <p v-if="data.resolution.reason" class="mt-0">Motivo: {{ data.resolution.reason }}</p>
               </template>
+            </div>
+
+            <div v-if="data.rollback" class="mt-4">
+              <h3 class="label mb-1">Rollback</h3>
+              <p class="mt-0 mb-1">
+                <strong>{{ data.rollback.by }}</strong> reverteu em {{ dateTime(data.rollback.at) }}: {{ data.rollback.execution.detail }}
+              </p>
+              <p class="mt-0">Motivo: {{ data.rollback.reason }}</p>
+            </div>
+            <div v-else-if="undo" class="mt-4">
+              <h3 class="label mb-2">Rollback</h3>
+              <RollbackPanel :incident-id="data.incidentId" :undo-action="undo.actionId" :summary="(data.execution ?? data.resolution?.execution)?.detail ?? ''" />
             </div>
           </div>
         </section>

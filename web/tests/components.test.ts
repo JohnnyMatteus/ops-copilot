@@ -2,6 +2,7 @@ import { VueQueryPlugin } from '@tanstack/vue-query';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import DecisionPanel from '@/components/DecisionPanel.vue';
+import RollbackPanel from '@/components/RollbackPanel.vue';
 import GateTape from '@/components/signature/GateTape.vue';
 import HashLink from '@/components/signature/HashLink.vue';
 import { awaitingReport } from './fixtures';
@@ -59,6 +60,22 @@ describe('DecisionPanel', () => {
     await wrapper.get('[data-test="approve"]').trigger('click');
     expect(wrapper.find('[data-test="type-service"]').exists()).toBe(false);
     expect((wrapper.get('[data-test="confirm"]').element as HTMLButtonElement).disabled).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe('RollbackPanel', () => {
+  it('reverter só confirma com motivo', async () => {
+    const wrapper = mount(RollbackPanel, {
+      props: { incidentId: 'i', undoAction: 'restore_deployment_replicas', summary: '4 → 6' },
+      global: { plugins: [VueQueryPlugin] },
+      attachTo: document.body,
+    });
+    await wrapper.get('[data-test="rollback"]').trigger('click');
+    const confirm = () => wrapper.get('[data-test="rollback-confirm"]').element as HTMLButtonElement;
+    expect(confirm().disabled).toBe(true);
+    await wrapper.get('[data-test="rollback-reason"] textarea').setValue('latência voltou');
+    expect(confirm().disabled).toBe(false);
     wrapper.unmount();
   });
 });

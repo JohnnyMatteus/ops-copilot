@@ -37,6 +37,14 @@ export class RedisIncidentRepository implements IncidentRepository {
     return values.filter((raw): raw is string => raw !== null).map((raw) => JSON.parse(raw) as IncidentReport);
   }
 
+  async claimRollback(incidentId: string): Promise<boolean> {
+    return (await this.#redis.set(`${this.#prefix}:rollback:${incidentId}`, '1', 'PX', RETENTION_MS, 'NX')) === 'OK';
+  }
+
+  async releaseRollback(incidentId: string): Promise<void> {
+    await this.#redis.del(`${this.#prefix}:rollback:${incidentId}`);
+  }
+
   #key(id: string): string {
     return `${this.#prefix}:${id}`;
   }

@@ -11,6 +11,7 @@ import { createHttpServer } from './http/server.js';
 import { ApprovalService } from './incident/approval-service.js';
 import { InMemoryApprovalQueue, type ApprovalQueue } from './incident/approvals.js';
 import { InMemoryIncidentRepository, type IncidentRepository } from './incident/incidents.js';
+import { RollbackService } from './incident/rollback-service.js';
 import { Investigator } from './incident/investigator.js';
 import { RedisApprovalQueue } from './incident/redis-approvals.js';
 import { RedisIncidentRepository } from './incident/redis-incidents.js';
@@ -68,6 +69,7 @@ export async function createApp(env: Env, logger: Logger) {
     incidents,
     audit,
     approvalService: new ApprovalService({ approvals, incidents, gate, executor, audit, metrics }),
+    rollbackService: new RollbackService({ incidents, gate, executor, audit, metrics }),
     authenticator: createAuthenticator(env),
     policy,
     playbooks,

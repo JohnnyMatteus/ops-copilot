@@ -5,6 +5,7 @@ import type { Alert } from '../../src/domain/alert.js';
 import { StaticTokenAuthenticator } from '../../src/auth/operator.js';
 import { createHttpServer } from '../../src/http/server.js';
 import type { IncidentReport } from '../../src/incident/investigator.js';
+import { RollbackService } from '../../src/incident/rollback-service.js';
 import { ApprovalService } from '../../src/incident/approval-service.js';
 import { FakeLlmClient } from '../../src/llm/fake.js';
 import { FixtureMetricsSource, FixtureTraceSource } from '../../src/signals/fixture.js';
@@ -35,6 +36,7 @@ async function start() {
     incidents: setup.incidents,
     audit: setup.audit,
     approvalService: new ApprovalService({ ...setup, executor: setup.deps.executor }),
+    rollbackService: new RollbackService({ ...setup, executor: setup.deps.executor }),
     authenticator: new StaticTokenAuthenticator(
       new Map([
         ['plantonista@example.com', PLANTAO_TOKEN],
@@ -240,6 +242,13 @@ describe('servidor HTTP', () => {
     expect((await call('/healthz')).status).toBe(200);
     const metrics = await call('/metrics');
     expect(await metrics.text()).toContain('ops_copilot_incidents_total');
+  });
+
+  it('POST /incidents/:id/rollback devolve 404 para incidente desconhecido e 400 sem motivo', async () => {
+    const { call } = await start();
+    const id = 'a1b2c3d4-0000-4000-8000-0000000000ff';
+    expect((await call(`/incidents/${id}/rollback`, post(LIDER_TOKEN, { reason: 'teste' }))).status).toBe(404);
+    expect((await call(`/incidents/${id}/rollback`, post(LIDER_TOKEN, {}))).status).toBe(400);
   });
 });
 

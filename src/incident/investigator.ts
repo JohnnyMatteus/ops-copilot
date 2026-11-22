@@ -10,7 +10,7 @@ import type { Signal } from '../signals/types.js';
 import type { LlmUsage } from '../llm/structured.js';
 import { withSpan } from '../telemetry/tracing.js';
 import type { Diagnosis } from './diagnosis.js';
-import type { Resolution } from './incidents.js';
+import type { Resolution, RollbackRecord } from './incidents.js';
 
 export interface IncidentReport {
   readonly incidentId: string;
@@ -35,6 +35,8 @@ export interface IncidentReport {
   readonly alertSummary: string | null;
   /** Decisão humana posterior (aprovação, recusa ou cancelamento); `null` enquanto ninguém decidiu. */
   readonly resolution: Resolution | null;
+  /** Rollback posterior à execução; ausente em relatórios anteriores ao recurso. */
+  readonly rollback?: RollbackRecord | null;
   readonly startedAt: string;
   readonly finishedAt: string;
 }

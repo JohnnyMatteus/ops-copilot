@@ -10,6 +10,7 @@ import type { ActionBudget } from '../autonomy/budget.js';
 import type { AutonomyPolicy } from '../autonomy/policy.js';
 import type { Operator, OperatorAuthenticator } from '../auth/operator.js';
 import { ReasonRequiredError, type ApprovalService } from '../incident/approval-service.js';
+import type { RollbackService } from '../incident/rollback-service.js';
 import type { ApprovalQueue } from '../incident/approvals.js';
 import type { IncidentRepository } from '../incident/incidents.js';
 import type { PlaybookRegistry } from '../playbooks/registry.js';
@@ -43,6 +44,7 @@ export interface ServerDeps {
   readonly incidents: IncidentRepository;
   readonly audit: AuditLog;
   readonly approvalService: ApprovalService;
+  readonly rollbackService: RollbackService;
   readonly authenticator: OperatorAuthenticator;
   readonly policy: AutonomyPolicy;
   readonly playbooks: PlaybookRegistry;
@@ -77,6 +79,7 @@ export function createHttpServer(deps: ServerDeps): Server {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const approvalMatch = /^\/approvals\/([0-9a-f-]{36})$/.exec(url.pathname);
     const cancelMatch = /^\/incidents\/([0-9a-f-]{36})\/cancel$/.exec(url.pathname);
+    const rollbackMatch = /^\/incidents\/([0-9a-f-]{36})\/rollback$/.exec(url.pathname);
     const incidentMatch = /^\/incidents\/([0-9a-f-]{36})$/.exec(url.pathname);
 
     if (req.method === 'GET' && url.pathname === '/healthz') {
@@ -153,6 +156,23 @@ export function createHttpServer(deps: ServerDeps): Server {
       const outcome = await deps.approvalService.cancel(cancelMatch[1], operator, body.data.reason);
       const status = { cancelled: 200, not_found: 404, not_cancellable: 409 }[outcome.status];
       return json(res, status, outcome);
+    }
+
+    if (req.method === 'POST' && rollbackMatch?.[1]) {
+      const body = CancelBodySchema.safeParse(await readJson(req));
+      if (!body.success) throw new HttpError(400, 'Corpo esperado: {"reason": motivo}.');
+      const outcome = await deps.rollbackService.rollback(rollbackMatch[1], operator, body.data.reason);
+      const status = { rolled_back: 200, failed: 502, dry_run: 409, blocked: 409, not_found: 404, not_reversible: 409, already_rolled_back: 409 }[outcome.status];
+      const error = {
+        rolled_back: null,
+        dry_run: 'O copiloto está em dry-run: nada foi alterado, o rollback não foi aplicado.',
+        failed: outcome.status === 'failed' ? `O rollback falhou: ${outcome.execution.detail}` : null,
+        blocked: outcome.status === 'blocked' ? `Bloqueado pelo gate: ${outcome.decision.reasons.join(' ')}` : null,
+        not_found: 'Incidente não encontrado.',
+        not_reversible: 'reason' in outcome ? outcome.reason : null,
+        already_rolled_back: 'reason' in outcome ? outcome.reason : null,
+      }[outcome.status];
+      return json(res, status, error ? { ...outcome, error } : outcome);
     }
 
     if (req.method === 'GET' && url.pathname === '/incidents') {
