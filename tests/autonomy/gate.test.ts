@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { InMemoryActionBudget, type ActionBudget } from '../../src/autonomy/budget.js';
 import { AutonomyGate, evaluate, type GateInput } from '../../src/autonomy/gate.js';
-import { resolveServicePolicy, type AutonomyPolicy } from '../../src/autonomy/policy.js';
+import { AutonomyPolicySchema, resolveServicePolicy, type AutonomyPolicy } from '../../src/autonomy/policy.js';
 import type { Playbook } from '../../src/playbooks/schema.js';
+import { PlaybookActionSchema } from '../../src/playbooks/schema.js';
 import { playbookById } from '../helpers/repo.js';
 
 const basePolicy: AutonomyPolicy = {
@@ -249,5 +250,40 @@ describe('AutonomyGate', () => {
     });
     expect(decision.verdict).toBe('needs_approval');
     expect(decision.action?.params).toEqual({ queue: 'payments.events.dlq', maxMessages: 100 });
+  });
+});
+
+describe('ações inversas fora do rollback', () => {
+  it('o gate bloqueia restore_* mesmo com política e playbook permissivos, com parâmetros que o schema aceitaria', () => {
+    const permissive = withPolicy({
+      services: {
+        ...basePolicy.services,
+        'payments-events-go': { level: 'auto_execute', allowedActions: ['scale_deployment', 'restore_deployment_replicas'], budget: { window: '1h', maxAutoActions: 5 } },
+      },
+    });
+    const forged: Playbook = {
+      ...payments,
+      actions: [
+        ...payments.actions,
+        { action: 'restore_deployment_replicas', when: ['consumer_saturation'], params: {}, rationale: 'forjada' },
+      ],
+    };
+    const decision = decide(
+      {
+        service: 'payments-events-go',
+        playbook: forged,
+        hypothesisId: 'consumer_saturation',
+        confidence: 1,
+        proposal: { actionId: 'restore_deployment_replicas', params: { deployment: 'payments-consumer', replicas: 0, expectedCurrent: 0 } },
+      },
+      permissive,
+    );
+    expect(decision.verdict).toBe('blocked');
+    expect(decision.checks.find((check) => check.check === 'origem')?.passed).toBe(false);
+  });
+
+  it('schemas de playbook e política recusam inversas', () => {
+    expect(PlaybookActionSchema.safeParse({ action: 'restore_feature_flag', when: ['x'], rationale: 'r' }).success).toBe(false);
+    expect(AutonomyPolicySchema.safeParse({ ...basePolicy, services: { s: { level: 'suggest', allowedActions: ['restore_feature_flag'] } } }).success).toBe(false);
   });
 });

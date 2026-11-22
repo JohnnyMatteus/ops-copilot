@@ -169,6 +169,7 @@ Para defender o núcleo numa entrevista: [roteiro dos limites de autonomia](docs
 
 ## Próximos passos
 
+- `notify_oncall` em modo live ainda não tem adaptador de notificação (falha explícita).
 - Exercitar o executor real contra um cluster, um serviço de flags e uma DLQ de verdade.
 - Aprovação via ChatOps (Slack/Teams), papéis separados (leitor e aprovador) e um teto de custo de LLM por incidente.
 - RAG sobre runbooks em Markdown para enriquecer a orientação dos playbooks.

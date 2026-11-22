@@ -54,13 +54,45 @@ describe('LiveExecutor', () => {
     const kube = new FakeKube();
     const executor = new LiveExecutor(allowlist, { kubernetes: kube });
     const result = await executor.execute(scale('saas-api'), ctx);
-    expect(result).toMatchObject({ status: 'executed', undo: { actionId: 'restore_deployment_replicas', params: { deployment: 'saas-api', replicas: 4 } } });
+    expect(result).toMatchObject({ status: 'executed', undo: { actionId: 'restore_deployment_replicas', params: { deployment: 'saas-api', replicas: 4, expectedCurrent: 6 } } });
     expect(kube.replicasNow).toBe(6);
 
     kube.replicasNow = 10;
     const atCeiling = await executor.execute(scale('saas-api'), ctx);
     expect(atCeiling).toMatchObject({ status: 'executed', undo: null });
     expect(kube.replicasNow).toBe(10);
+  });
+
+  it('restauração recusa se alguém mudou o estado depois do scale, e scale não liga deployment parado', async () => {
+    const kube = new FakeKube();
+    const executor = new LiveExecutor(allowlist, { kubernetes: kube });
+    const scaled = await executor.execute(scale('saas-api'), ctx);
+    const restore = { id: 'restore_deployment_replicas', params: scaled.undo?.params ?? {}, reversible: true } as const;
+
+    kube.replicasNow = 9; // outra pessoa ajustou à mão
+    const refused = await executor.execute(restore, ctx);
+    expect(refused.status).toBe('failed');
+    expect(refused.detail).toMatch(/alguém mexeu/);
+    expect(kube.replicasNow).toBe(9);
+
+    kube.replicasNow = 6;
+    expect((await executor.execute(restore, ctx)).status).toBe('executed');
+    expect(kube.replicasNow).toBe(4);
+
+    kube.replicasNow = 0;
+    const stopped = await executor.execute(scale('saas-api'), ctx);
+    expect(stopped.status).toBe('failed');
+    expect(kube.replicasNow).toBe(0);
+  });
+
+  it('restauração da flag recusa se ela já foi religada por outra pessoa', async () => {
+    const flags = new FakeFlags();
+    const executor = new LiveExecutor(allowlist, { featureFlags: flags });
+    const restore = { id: 'restore_feature_flag', params: { flag: 'reports.heavy_export', enabled: true }, reversible: true } as const;
+    flags.state.set('reports.heavy_export', true);
+    expect((await executor.execute(restore, ctx)).status).toBe('failed');
+    flags.state.set('reports.heavy_export', false);
+    expect((await executor.execute(restore, ctx)).status).toBe('executed');
   });
 
   it('alvo fora da allowlist nunca chega ao backend', async () => {
@@ -80,7 +112,7 @@ describe('LiveExecutor', () => {
 
   it('sem backend configurado falha de forma explícita, sem simular sucesso', async () => {
     const executor = new LiveExecutor(allowlist, {});
-    expect((await executor.execute(scale('saas-api'), ctx)).detail).toMatch(/não configurado/);
+    expect((await executor.execute(scale('saas-api'), ctx)).detail).toMatch(/ainda não tem adaptador|não configurado/);
     expect((await executor.execute({ id: 'notify_oncall', params: { channel: '#x' }, reversible: true }, ctx)).status).toBe('failed');
     expect((await executor.execute({ id: 'reset_consumer_offsets', params: {}, reversible: false }, ctx)).status).toBe('failed');
   });
@@ -109,6 +141,9 @@ describe('LiveExecutor', () => {
   it('a allowlist versionada do repositório é válida e recusa namespace de sistema', async () => {
     const loaded = await loadExecutorTargets(`${ROOT}/config/executor-targets.yaml`);
     expect(loaded.kubernetes('kafka-telemetry', 'readings-enricher')).toEqual({ namespace: 'telemetry', deployment: 'readings-enricher' });
+    expect(() =>
+      ExecutorTargetsSchema.parse({ apiVersion: 'ops-copilot/v1', kind: 'ExecutorTargets', dlq: { svc: [{ queue: 'a.dlq', replayTo: 'a.dlq' }] } }),
+    ).toThrow(/própria DLQ/);
     expect(() =>
       ExecutorTargetsSchema.parse({ apiVersion: 'ops-copilot/v1', kind: 'ExecutorTargets', kubernetes: { svc: { namespace: 'kube-system', deployments: ['x'] } } }),
     ).toThrow(/namespace de sistema/);
@@ -159,7 +194,7 @@ describe('KubernetesAdapter contra um emulador local da API', () => {
 
   async function emulator() {
     const requests: { method: string; url: string; type: string; body: unknown }[] = [];
-    let replicas = 3;
+    let replicas: number | undefined = 3;
     server = createServer((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -184,8 +219,14 @@ describe('KubernetesAdapter contra um emulador local da API', () => {
       contexts: [{ name: 'teste', cluster: 'emulador', user: 'teste' }],
       currentContext: 'teste',
     });
-    return { adapter: new KubernetesAdapter(config), requests };
+    return { adapter: new KubernetesAdapter(config), requests, setMissing: () => (replicas = undefined) };
   }
+
+  it('resposta sem spec.replicas é erro, nunca zero', async () => {
+    const { adapter, setMissing } = await emulator();
+    setMissing();
+    await expect(adapter.replicas('saas', 'saas-api')).rejects.toThrow(/sem spec.replicas/);
+  });
 
   it('lê o scale, escala com JSON Patch condicional e reinicia por anotação', async () => {
     const { adapter, requests } = await emulator();

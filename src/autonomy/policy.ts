@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { durationToMs } from '../shared/duration.js';
-import { ActionIdSchema } from './catalog.js';
+import { ActionIdSchema, INVERSE_ACTION_IDS } from './catalog.js';
 import { AutonomyLevelSchema, type AutonomyLevel } from './levels.js';
 
 const BudgetSchema = z.strictObject({
@@ -13,7 +13,7 @@ const BudgetSchema = z.strictObject({
 
 const ServicePolicySchema = z.strictObject({
   level: AutonomyLevelSchema,
-  allowedActions: z.array(ActionIdSchema),
+  allowedActions: z.array(ActionIdSchema.refine((id) => !INVERSE_ACTION_IDS.has(id), 'ação inversa não entra na allowlist; o rollback usa a da ação original')),
   budget: BudgetSchema.optional(),
 });
 

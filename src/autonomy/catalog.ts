@@ -49,13 +49,19 @@ export const ACTION_CATALOG = {
       enabled: z.literal(false),
     }),
   },
-  // Ações inversas: só entram pelo rollback, sempre com aprovação humana, nunca propostas pelo LLM.
+  // Ações inversas (ADR 0015): só entram pelo rollback, com aprovação humana. O gate normal as bloqueia
+  // por código (INVERSE_ACTION_IDS) e os schemas de playbook e política as recusam.
   restore_deployment_replicas: {
     id: 'restore_deployment_replicas',
     description: 'Devolve o deployment à contagem de réplicas anterior a scale_deployment.',
     reversible: true,
     maxAutonomy: 'execute_with_approval',
-    params: z.strictObject({ deployment: k8sName, replicas: z.number().int().min(0).max(12) }),
+    // `expectedCurrent` é o valor que o scale deixou: se o atual for outro, alguém mexeu depois e o undo recusa.
+    params: z.strictObject({
+      deployment: k8sName,
+      replicas: z.number().int().min(0).max(12),
+      expectedCurrent: z.number().int().min(0).max(12),
+    }),
   },
   restore_feature_flag: {
     id: 'restore_feature_flag',
@@ -100,7 +106,7 @@ export type ActionId = keyof typeof ACTION_CATALOG;
 
 export const ActionIdSchema = z.enum(Object.keys(ACTION_CATALOG) as [ActionId, ...ActionId[]]);
 
-/** Ações que existem só como inversas de outras: o LLM nunca as propõe. */
+/** Ações que existem só como inversas de outras: o gate normal as bloqueia, só o rollback as avalia. */
 export const INVERSE_ACTION_IDS: ReadonlySet<string> = new Set(
   Object.values(ACTION_CATALOG).flatMap((definition) => ('inverse' in definition ? [definition.inverse] : [])),
 );

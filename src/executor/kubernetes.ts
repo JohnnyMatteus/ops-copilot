@@ -28,7 +28,10 @@ export class KubernetesAdapter implements KubernetesPort {
 
   async replicas(namespace: string, deployment: string): Promise<number> {
     const scale = await this.#apps.readNamespacedDeploymentScale({ name: deployment, namespace });
-    return scale.spec?.replicas ?? 0;
+    const replicas = scale.spec?.replicas;
+    // Ausência não é zero: zero significa "parado de propósito" e muda o que o executor pode fazer.
+    if (replicas === undefined) throw new Error(`Resposta do Kubernetes sem spec.replicas para ${namespace}/${deployment}.`);
+    return replicas;
   }
 
   async setReplicas(namespace: string, deployment: string, from: number, to: number): Promise<void> {

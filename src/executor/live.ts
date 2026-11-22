@@ -47,15 +47,19 @@ export class LiveExecutor implements ActionExecutor {
         const current = await kube.replicas(target.namespace, target.deployment);
         const where = `${target.namespace}/${target.deployment}`;
         if (action.id === 'restore_deployment_replicas') {
+          if (current !== num('expectedCurrent')) {
+            return refuse(`${where}: tem ${String(current)} réplicas, não as ${String(num('expectedCurrent'))} que o scale deixou; alguém mexeu depois. Restauração recusada.`);
+          }
           await kube.setReplicas(target.namespace, target.deployment, current, num('replicas'));
           return done(`${where}: ${String(current)} → ${String(num('replicas'))} réplicas (restauração).`);
         }
+        if (current === 0) return refuse(`${where}: parado em 0 réplicas (de propósito, presume-se); scale_deployment não o liga.`);
         const next = Math.min(current + num('replicasDelta'), num('maxReplicas'));
         if (next <= current) return done(`${where}: já em ${String(current)} réplicas, no teto ${String(num('maxReplicas'))}; nada a fazer.`);
         await kube.setReplicas(target.namespace, target.deployment, current, next);
         return done(`${where}: ${String(current)} → ${String(next)} réplicas.`, {
           actionId: 'restore_deployment_replicas',
-          params: { deployment: target.deployment, replicas: current },
+          params: { deployment: target.deployment, replicas: current, expectedCurrent: next },
         });
       }
       case 'restart_pods': {
@@ -73,6 +77,9 @@ export class LiveExecutor implements ActionExecutor {
         if (!flags) return refuse('Backend de feature flags não configurado.');
         const enabled = params['enabled'] === true;
         const before = await flags.isEnabled(flag);
+        if (action.id === 'restore_feature_flag' && before) {
+          return refuse(`Flag ${flag} já está ligada: alguém mexeu depois do toggle. Restauração recusada.`);
+        }
         if (before === enabled) return done(`Flag ${flag} já estava ${enabled ? 'ligada' : 'desligada'}; nada a fazer.`);
         await flags.set(flag, enabled);
         const undo = action.id === 'toggle_feature_flag' && before ? { actionId: 'restore_feature_flag', params: { flag, enabled: true } } : null;
@@ -86,7 +93,7 @@ export class LiveExecutor implements ActionExecutor {
         return done(`${String(moved)} mensagem(ns) de ${text('queue')} reenviadas para ${route}.`);
       }
       case 'notify_oncall': {
-        if (!this.#backends.notifier) return refuse('Notificador não configurado.');
+        if (!this.#backends.notifier) return refuse('notify_oncall em modo live ainda não tem adaptador de notificação (não implementado).');
         await this.#backends.notifier.notify(
           text('channel'),
           `Incidente ${context.incidentId} em ${service}: o copiloto pede atenção do plantão (autorizado por ${context.authorizedBy}).`,

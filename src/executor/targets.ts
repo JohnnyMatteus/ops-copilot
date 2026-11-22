@@ -24,7 +24,16 @@ export const ExecutorTargetsSchema = z.strictObject({
   featureFlags: z.record(z.string().min(1), z.array(z.string().regex(/^[a-z0-9_.-]{1,64}$/)).min(1)).default({}),
   /** Cada DLQ declara para qual fila volta: o destino nunca vem do LLM. */
   dlq: z
-    .record(z.string().min(1), z.array(z.strictObject({ queue: queueName, replayTo: queueName })).min(1))
+    .record(
+      z.string().min(1),
+      z
+        .array(
+          z
+            .strictObject({ queue: queueName, replayTo: queueName })
+            .refine((route) => route.queue !== route.replayTo, 'replayTo não pode ser a própria DLQ'),
+        )
+        .min(1),
+    )
     .default({}),
 });
 export type ExecutorTargets = z.infer<typeof ExecutorTargetsSchema>;

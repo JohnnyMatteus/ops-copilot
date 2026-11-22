@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import type { Playbook } from '../playbooks/schema.js';
 import type { ActionBudget } from './budget.js';
-import { findAction } from './catalog.js';
+import { findAction, INVERSE_ACTION_IDS } from './catalog.js';
 import { mostRestrictive, type AutonomyLevel } from './levels.js';
 import { resolveServicePolicy, type AutonomyPolicy, type ResolvedServicePolicy } from './policy.js';
 
@@ -65,6 +65,13 @@ export function evaluate(input: GateInput, service: ResolvedServicePolicy, budge
     return blocked(`Ação desconhecida: ${proposal.actionId}.`);
   }
   record('catalogo', true, `${definition.id} conhecida`);
+
+  // A origem da proposta é definida aqui, por código: `evaluate` só trata propostas do diagnóstico, e
+  // inversas só existem no caminho do rollback (evaluateRollback), nunca por campo vindo do LLM.
+  if (INVERSE_ACTION_IDS.has(definition.id)) {
+    record('origem', false, `${definition.id} é ação inversa: só o rollback a executa`);
+    return blocked(`Ação ${definition.id} só pode vir de um rollback, nunca de uma proposta do diagnóstico.`);
+  }
 
   if (!service.allowedActions.has(definition.id)) {
     record('allowlist', false, `${definition.id} fora da allowlist de ${input.service}`);
