@@ -11,6 +11,7 @@ export class CopilotMetrics {
   readonly signalFailures: Counter<'source'>;
   readonly nodeDuration: Histogram<'node'>;
   readonly approvals: Counter<'service' | 'outcome'>;
+  readonly rollbacks: Counter<'service' | 'outcome'>;
 
   constructor(registry: Registry = new Registry()) {
     this.registry = registry;
@@ -61,6 +62,12 @@ export class CopilotMetrics {
     this.approvals = new Counter({
       name: 'ops_copilot_approvals_total',
       help: 'Pedidos de aprovação resolvidos por humanos, por desfecho.',
+      labelNames: ['service', 'outcome'],
+      registers,
+    });
+    this.rollbacks = new Counter({
+      name: 'ops_copilot_rollbacks_total',
+      help: 'Rollbacks de ações executadas, por desfecho.',
       labelNames: ['service', 'outcome'],
       registers,
     });

@@ -102,3 +102,9 @@ export const useCancel = () =>
   useDecisionMutation(({ incidentId, reason }: { incidentId: string; reason: string }) =>
     post(OutcomeResponseSchema, `/incidents/${incidentId}/cancel`, { reason }),
   );
+
+/** Reverte a ação executada pela inversa guardada; passa pelo gate e é auditado no servidor. */
+export const useRollback = () =>
+  useDecisionMutation(({ incidentId, reason }: { incidentId: string; reason: string }) =>
+    post(OutcomeResponseSchema, `/incidents/${incidentId}/rollback`, { reason }),
+  );

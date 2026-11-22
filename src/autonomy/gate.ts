@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Playbook } from '../playbooks/schema.js';
 import type { ActionBudget } from './budget.js';
 import { findAction, INVERSE_ACTION_IDS } from './catalog.js';
-import { mostRestrictive, type AutonomyLevel } from './levels.js';
+import { isAtLeast, mostRestrictive, type AutonomyLevel } from './levels.js';
 import { resolveServicePolicy, type AutonomyPolicy, type ResolvedServicePolicy } from './policy.js';
 
 export const VerdictSchema = z.enum(['blocked', 'suggest', 'needs_approval', 'auto_execute']);
@@ -150,6 +150,61 @@ export function evaluate(input: GateInput, service: ResolvedServicePolicy, budge
   }
 }
 
+export interface RollbackGateInput {
+  readonly service: string;
+  /** Ação original que gerou o `undo`; a inversa só vale se o catálogo a declarar para ela. */
+  readonly originalActionId: string;
+  readonly undo: { readonly actionId: string; readonly params: Readonly<Record<string, unknown>> };
+}
+
+/**
+ * Avaliação pura do rollback (ADR 0015). Passa pelas mesmas barreiras do gate normal: catálogo,
+ * allowlist do serviço (da ação original), parâmetros, kill switch e nível. Nunca é automático:
+ * o veredito máximo é `needs_approval`, e quem chama só executa com um aprovador humano.
+ */
+export function evaluateRollback(input: RollbackGateInput, service: ResolvedServicePolicy): Decision {
+  const checks: GateCheck[] = [];
+  const record = (check: string, passed: boolean, detail: string) => checks.push({ check, passed, detail });
+  const blocked = (reason: string, action: ApprovedAction | null = null): Decision => ({
+    verdict: 'blocked',
+    effectiveLevel: null,
+    action,
+    reasons: [reason],
+    checks,
+  });
+
+  const original = findAction(input.originalActionId);
+  const inverse = findAction(input.undo.actionId);
+  if (!original || !inverse) {
+    record('catalogo', false, 'ação original ou inversa fora do catálogo');
+    return blocked('Ação desconhecida no rollback.');
+  }
+  record('catalogo', true, `${original.id} → ${inverse.id}`);
+  const declared = original.inverse === inverse.id;
+  record('inversa', declared, declared ? `${inverse.id} é a inversa de ${original.id}` : `${inverse.id} não é a inversa de ${original.id}`);
+  if (!declared) return blocked(`${inverse.id} não é a ação inversa de ${original.id}.`);
+
+  const allowed = service.allowedActions.has(original.id);
+  record('allowlist', allowed, `${original.id} ${allowed ? 'permitida' : 'fora da allowlist'} em ${input.service}`);
+  if (!allowed) return blocked(`Ação ${original.id} fora da allowlist do serviço ${input.service}.`);
+
+  const parsed = inverse.params.safeParse(input.undo.params);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+    record('parametros', false, detail);
+    return blocked(`Parâmetros inválidos para ${inverse.id}: ${detail}.`);
+  }
+  record('parametros', true, 'dentro dos limites do catálogo');
+  const action: ApprovedAction = { id: inverse.id, params: parsed.data, reversible: inverse.reversible };
+
+  record('kill_switch', !service.killSwitch, service.killSwitch ? 'ligado: execução desativada' : 'desligado');
+  if (service.killSwitch) return blocked('Kill switch ligado: execução desativada.', action);
+  const level = mostRestrictive(service.level, inverse.maxAutonomy);
+  record('nivel', isAtLeast(level, 'execute_with_approval'), `mais restritivo entre serviço (${service.level}) e ação (${inverse.maxAutonomy}): ${level}`);
+  if (!isAtLeast(level, 'execute_with_approval')) return blocked(`Nível efetivo ${level} não permite executar.`, action);
+  return { verdict: 'needs_approval', effectiveLevel: 'execute_with_approval', action, reasons: ['Rollback exige aprovação humana.'], checks };
+}
+
 const formatBudget = (remaining: number) => (Number.isFinite(remaining) ? String(remaining) : 'não se aplica (aprovação humana)');
 
 const unavailableBudget: GateCheck = { check: 'orcamento', passed: false, detail: 'indisponível: falha fechada' };
@@ -202,6 +257,11 @@ export class AutonomyGate {
     const decision = evaluate(input, service, Number.POSITIVE_INFINITY);
     if (decision.verdict === 'needs_approval' || decision.verdict === 'auto_execute') return decision;
     return { ...decision, verdict: 'blocked', reasons: [...decision.reasons, 'Aprovação recusada pela política atual.'] };
+  }
+
+  /** Rollback: mesma política, nunca consome o orçamento automático e nunca é automático. */
+  authorizeRollback(input: RollbackGateInput): Decision {
+    return evaluateRollback(input, resolveServicePolicy(this.#policy, input.service));
   }
 
   /** Política resolvida de um serviço, para leitura no painel. */

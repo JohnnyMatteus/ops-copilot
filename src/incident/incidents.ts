@@ -12,15 +12,38 @@ export interface Resolution {
   readonly execution: ExecutionResult | null;
 }
 
+/** Rollback já feito (ou tentado) neste incidente. */
+export interface RollbackRecord {
+  readonly by: string;
+  readonly reason: string;
+  readonly at: string;
+  readonly execution: ExecutionResult;
+}
+
 export interface IncidentRepository {
   save(report: IncidentReport): Promise<void>;
   get(incidentId: string): Promise<IncidentReport | null>;
   /** Mais recentes primeiro. */
   list(limit: number): Promise<readonly IncidentReport[]>;
+  /** Reserva o direito de reverter o incidente: só o primeiro chamador recebe `true`. */
+  claimRollback(incidentId: string): Promise<boolean>;
+  /** Devolve a reserva quando o rollback não chegou a executar (bloqueado pelo gate). */
+  releaseRollback(incidentId: string): Promise<void>;
 }
 
 export class InMemoryIncidentRepository implements IncidentRepository {
   readonly #reports = new Map<string, IncidentReport>();
+  readonly #claimed = new Set<string>();
+
+  async claimRollback(incidentId: string): Promise<boolean> {
+    if (this.#claimed.has(incidentId)) return false;
+    this.#claimed.add(incidentId);
+    return true;
+  }
+
+  async releaseRollback(incidentId: string): Promise<void> {
+    this.#claimed.delete(incidentId);
+  }
 
   async save(report: IncidentReport): Promise<void> {
     this.#reports.set(report.incidentId, report);

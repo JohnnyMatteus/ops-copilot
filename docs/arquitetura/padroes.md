@@ -15,7 +15,7 @@ O domínio (gate, grafo, casos de uso) depende de interfaces. Os adaptadores con
 | [`ActionBudget`](../../src/autonomy/budget.ts#L7) | [Redis](../../src/autonomy/redis-budget.ts#L15), [em memória](../../src/autonomy/budget.ts#L13) |
 | [`ApprovalQueue`](../../src/incident/approvals.ts#L18) | [Redis](../../src/incident/redis-approvals.ts#L14), [em memória](../../src/incident/approvals.ts#L35) |
 | [`IncidentRepository`](../../src/incident/incidents.ts#L4) | [Redis](../../src/incident/redis-incidents.ts#L9), em memória |
-| [`ActionExecutor`](../../src/executor/executor.ts#L22) | [`DryRunExecutor`](../../src/executor/executor.ts#L28) |
+| [`ActionExecutor`](../../src/executor/executor.ts) | `DryRunExecutor`, [`LiveExecutor`](../../src/executor/live.ts) (portas `KubernetesPort`, `FeatureFlagPort`, `DlqPort`) |
 
 - **Problema:** testar o grafo e o gate sem LLM, Prometheus, S3 ou Redis; trocar provedor sem tocar no domínio.
 - **Trade-off:** mais arquivos e uma indireção a cada borda. Os adaptadores Redis e S3 só são cobertos pelos testes de integração (`make test-integration`).

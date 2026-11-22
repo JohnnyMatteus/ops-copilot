@@ -20,6 +20,9 @@ export const AuditEventSchema = z.enum([
   'approval_granted',
   'approval_rejected',
   'incident_cancelled',
+  'rollback_executed',
+  'rollback_failed',
+  'rollback_blocked',
 ]);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 

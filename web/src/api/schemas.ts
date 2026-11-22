@@ -25,6 +25,15 @@ export const ExecutionSchema = z.object({
   status: z.enum(['dry_run', 'executed', 'failed']),
   actionId: z.string(),
   detail: z.string(),
+  /** Ação inversa registrada pelo executor; presente só quando há como reverter. */
+  undo: z.object({ actionId: z.string(), params: ParamsSchema }).nullable().optional(),
+});
+
+export const RollbackSchema = z.object({
+  by: z.string(),
+  reason: z.string(),
+  at: z.string(),
+  execution: ExecutionSchema,
 });
 
 export const SignalSchema = z.discriminatedUnion('kind', [
@@ -103,6 +112,7 @@ export const IncidentSchema = z.object({
   alertStartedAt: z.string().optional(),
   alertSummary: z.string().nullable().default(null),
   resolution: ResolutionSchema.nullable().default(null),
+  rollback: RollbackSchema.nullable().default(null),
   startedAt: z.string(),
   finishedAt: z.string(),
 });
