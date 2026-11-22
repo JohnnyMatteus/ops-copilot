@@ -81,6 +81,7 @@ export const OutcomeSchema = z.enum([
   'awaiting_approval',
   'auto_executed',
   'execution_failed',
+  'interrupted',
 ]);
 export type Outcome = z.infer<typeof OutcomeSchema>;
 

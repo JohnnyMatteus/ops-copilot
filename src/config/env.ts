@@ -54,6 +54,8 @@ export const EnvSchema = z
     FEATURE_FLAGS_TOKEN: token.optional(),
     /** Redis onde vivem as filas de DLQ; separado do Redis de estado do copiloto. */
     DLQ_REDIS_URL: z.url().optional(),
+    /** Validade do lease de uma investigação, renovado por heartbeat enquanto ela roda (ADR 0018). */
+    INVESTIGATION_LEASE_SECONDS: z.coerce.number().int().min(5).max(600).default(30),
     APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(30),
     WEBHOOK_TOKEN: token,
     /** Operadores do ambiente local (ADR 0012): `email=token,email2=token2`. */

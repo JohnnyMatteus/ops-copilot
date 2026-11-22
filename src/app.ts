@@ -12,9 +12,13 @@ import { ApprovalService } from './incident/approval-service.js';
 import { InMemoryApprovalQueue, type ApprovalQueue } from './incident/approvals.js';
 import { InMemoryIncidentRepository, type IncidentRepository } from './incident/incidents.js';
 import { RollbackService } from './incident/rollback-service.js';
+import { MemorySaver, type BaseCheckpointSaver } from '@langchain/langgraph';
 import { Investigator } from './incident/investigator.js';
 import { RedisApprovalQueue } from './incident/redis-approvals.js';
 import { RedisIncidentRepository } from './incident/redis-incidents.js';
+import { RedisCheckpointSaver } from './graph/redis-checkpointer.js';
+import { InMemoryEffectGuard, RedisEffectGuard, type EffectGuard } from './incident/effects.js';
+import { InMemoryInvestigationJournal, RedisInvestigationJournal, type InvestigationJournal } from './incident/journal.js';
 import { createLlmClient } from './llm/factory.js';
 import { loadRunbooks } from './rag/runbooks.js';
 import { loadPlaybooks } from './playbooks/registry.js';
@@ -45,23 +49,29 @@ export async function createApp(env: Env, logger: Logger) {
   const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
 
   const runbooks = env.RUNBOOKS_DIR ? await loadRunbooks(env.RUNBOOKS_DIR) : undefined;
-  const investigator = new Investigator({
-    playbooks,
-    runbooks,
-    metricsSource: new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL }),
-    traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
-    llm,
-    model: env.LLM_MODEL,
-    maxLlmCostUsdPerIncident: env.LLM_MAX_COST_USD_PER_INCIDENT,
-    gate,
-    executor,
-    approvals,
-    incidents,
-    audit,
-    tracer: tracing.tracer,
-    metrics,
-    now: () => new Date(),
-  });
+  const investigator = new Investigator(
+    {
+      playbooks,
+      runbooks,
+      checkpointer: state.checkpointer,
+      journal: state.journal,
+      effects: state.effects,
+      metricsSource: new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL }),
+      traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
+      llm,
+      model: env.LLM_MODEL,
+      maxLlmCostUsdPerIncident: env.LLM_MAX_COST_USD_PER_INCIDENT,
+      gate,
+      executor,
+      approvals,
+      incidents,
+      audit,
+      tracer: tracing.tracer,
+      metrics,
+      now: () => new Date(),
+    },
+    { leaseMs: env.INVESTIGATION_LEASE_SECONDS * 1000 },
+  );
 
   const server = createHttpServer({
     investigate: async (alert) => {
@@ -95,6 +105,17 @@ export async function createApp(env: Env, logger: Logger) {
     webhookToken: env.WEBHOOK_TOKEN,
   });
 
+  const resume = () =>
+    investigator
+      .resumeInterrupted((incidentId, error) => logger.error({ err: error, incidentId }, 'falha ao retomar investigação'))
+      .then((reports) => {
+        if (reports.length > 0) logger.info({ resumed: reports.map((r) => [r.incidentId, r.outcome]) }, 'investigações retomadas');
+      })
+      .catch((error: unknown) => logger.error({ err: error }, 'falha ao retomar investigações'));
+  void resume();
+  const resumeTimer = setInterval(() => void resume(), 60_000);
+  resumeTimer.unref();
+
   logger.info(
     {
       runbooks: runbooks?.size ?? 0,
@@ -110,6 +131,7 @@ export async function createApp(env: Env, logger: Logger) {
   return {
     server,
     shutdown: async () => {
+      clearInterval(resumeTimer);
       await tracing.shutdown();
       await closeExecutor();
       await state.close();
@@ -121,6 +143,9 @@ interface StateAdapters {
   readonly budget: ActionBudget;
   readonly approvals: ApprovalQueue;
   readonly incidents: IncidentRepository;
+  readonly checkpointer: BaseCheckpointSaver;
+  readonly journal: InvestigationJournal;
+  readonly effects: EffectGuard;
   close(): Promise<void>;
 }
 
@@ -132,6 +157,9 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
       budget: new InMemoryActionBudget(),
       approvals: new InMemoryApprovalQueue({ ttlMs }),
       incidents: new InMemoryIncidentRepository(),
+      checkpointer: new MemorySaver(),
+      journal: new InMemoryInvestigationJournal(),
+      effects: new InMemoryEffectGuard(),
       close: async () => undefined,
     };
   }
@@ -140,6 +168,9 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
     budget: new RedisActionBudget(redis),
     approvals: new RedisApprovalQueue(redis, { ttlMs }),
     incidents: new RedisIncidentRepository(redis),
+    checkpointer: new RedisCheckpointSaver(redis),
+    journal: new RedisInvestigationJournal(redis),
+    effects: new RedisEffectGuard(redis),
     close: async () => {
       await redis.quit();
     },
