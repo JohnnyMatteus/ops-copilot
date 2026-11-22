@@ -33,6 +33,11 @@ services:
       GIT_COMMIT: ${GIT_COMMIT:-desconhecido}
       JAEGER_PUBLIC_URL: http://localhost:${JAEGER_UI_PORT:-16686}
       EXECUTION_MODE: dry-run
+      # ChatOps no Slack (ADR 0019): vazio = desligado.
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_USERS: ${SLACK_USERS:-}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_APPROVAL_CHANNEL: ${SLACK_APPROVAL_CHANNEL:-}
       AUDIT_SINK: s3
       AUDIT_S3_BUCKET: ${AUDIT_S3_BUCKET:-ops-copilot-audit}
       S3_ENDPOINT: http://minio:9000

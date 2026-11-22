@@ -223,7 +223,7 @@ export type PublicConfig = z.infer<typeof ConfigSchema>;
 export const OperatorSchema = z.object({
   email: z.string(),
   name: z.string(),
-  via: z.enum(['token', 'oidc']),
+  via: z.enum(['token', 'oidc', 'slack']),
   role: z.enum(['reader', 'approver']).default('reader'),
 });
 export type Operator = z.infer<typeof OperatorSchema>;

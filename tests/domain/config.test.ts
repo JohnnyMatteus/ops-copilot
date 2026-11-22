@@ -46,6 +46,19 @@ describe('configuração', () => {
   });
 });
 
+describe('Slack no ambiente', () => {
+  it('variáveis SLACK_* vazias, como o compose as repassa, valem como desligadas', () => {
+    const env = loadEnv({ ...base, SLACK_SIGNING_SECRET: '', SLACK_USERS: '', SLACK_BOT_TOKEN: '', SLACK_APPROVAL_CHANNEL: '', SLACK_API_URL: '' });
+    expect(env.SLACK_SIGNING_SECRET).toBeUndefined();
+    expect(env.SLACK_API_URL).toBe('https://slack.com/api');
+  });
+
+  it('segredo sem mapa de usuários, ou usuário malformado, é erro que cita a variável', () => {
+    expect(() => loadEnv({ ...base, SLACK_SIGNING_SECRET: 's'.repeat(20) })).toThrow(/SLACK_USERS/);
+    expect(() => loadEnv({ ...base, SLACK_SIGNING_SECRET: 's'.repeat(20), SLACK_USERS: 'ana=ana@example.com' })).toThrow(/SLACK_USERS/);
+  });
+});
+
 describe('executor', () => {
   it('dry-run é o padrão e descreve a ação sem executá-la', async () => {
     const { executor } = await createExecutor(loadEnv(base));

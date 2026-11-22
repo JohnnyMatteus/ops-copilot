@@ -6,6 +6,10 @@ import { AutonomyGate } from './autonomy/gate.js';
 import { RedisActionBudget } from './autonomy/redis-budget.js';
 import { loadAutonomyPolicy } from './autonomy/policy.js';
 import type { Env } from './config/env.js';
+import { InMemoryReplayGuard, RedisReplayGuard, type ReplayGuard } from './chatops/signature.js';
+import { SlackClient } from './chatops/slack-client.js';
+import { SlackInteractionHandler } from './chatops/slack-interactions.js';
+import { parseSlackUsers } from './chatops/users.js';
 import { createExecutor } from './executor/factory.js';
 import { createHttpServer } from './http/server.js';
 import { ApprovalService } from './incident/approval-service.js';
@@ -43,7 +47,10 @@ export async function createApp(env: Env, logger: Logger) {
   const audit = createAuditLog(env);
   const state = await createStateAdapters(env, logger);
   const gate = new AutonomyGate(policy, state.budget);
-  const { executor, close: closeExecutor } = await createExecutor(env);
+  const slack = env.SLACK_BOT_TOKEN
+    ? new SlackClient({ token: env.SLACK_BOT_TOKEN, baseUrl: env.SLACK_API_URL, approvalChannel: env.SLACK_APPROVAL_CHANNEL })
+    : undefined;
+  const { executor, close: closeExecutor } = await createExecutor(env, { notifier: slack });
   const { approvals, incidents } = state;
   metrics.observePendingApprovals(async () => (await approvals.list()).length);
   const llm = new InstrumentedLlmClient(await createLlmClient(env), tracing.tracer, metrics);
@@ -56,6 +63,7 @@ export async function createApp(env: Env, logger: Logger) {
       checkpointer: state.checkpointer,
       journal: state.journal,
       effects: state.effects,
+      announcer: slack,
       metricsSource: new PrometheusMetricsSource({ baseUrl: env.PROMETHEUS_URL }),
       traceSource: new JaegerTraceSource({ baseUrl: env.JAEGER_URL }),
       llm,
@@ -73,6 +81,7 @@ export async function createApp(env: Env, logger: Logger) {
     { leaseMs: env.INVESTIGATION_LEASE_SECONDS * 1000 },
   );
 
+  const approvalService = new ApprovalService({ approvals, incidents, gate, executor, audit, metrics });
   const server = createHttpServer({
     investigate: async (alert) => {
       const report = await investigator.investigate(alert);
@@ -82,7 +91,14 @@ export async function createApp(env: Env, logger: Logger) {
     approvals,
     incidents,
     audit,
-    approvalService: new ApprovalService({ approvals, incidents, gate, executor, audit, metrics }),
+    approvalService,
+    chatops: env.SLACK_SIGNING_SECRET && env.SLACK_USERS
+      ? {
+          signingSecret: env.SLACK_SIGNING_SECRET,
+          replay: state.replay,
+          handler: new SlackInteractionHandler({ users: parseSlackUsers(env.SLACK_USERS), approvals, approvalService, audit }),
+        }
+      : undefined,
     rollbackService: new RollbackService({ incidents, gate, executor, audit, metrics }),
     authenticator: createAuthenticator(env),
     policy,
@@ -146,6 +162,7 @@ interface StateAdapters {
   readonly checkpointer: BaseCheckpointSaver;
   readonly journal: InvestigationJournal;
   readonly effects: EffectGuard;
+  readonly replay: ReplayGuard;
   close(): Promise<void>;
 }
 
@@ -160,6 +177,7 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
       checkpointer: new MemorySaver(),
       journal: new InMemoryInvestigationJournal(),
       effects: new InMemoryEffectGuard(),
+      replay: new InMemoryReplayGuard(),
       close: async () => undefined,
     };
   }
@@ -171,6 +189,7 @@ async function createStateAdapters(env: Env, logger: Logger): Promise<StateAdapt
     checkpointer: new RedisCheckpointSaver(redis),
     journal: new RedisInvestigationJournal(redis),
     effects: new RedisEffectGuard(redis),
+    replay: new RedisReplayGuard(redis),
     close: async () => {
       await redis.quit();
     },

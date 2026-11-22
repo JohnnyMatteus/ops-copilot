@@ -93,6 +93,9 @@ export class LiveExecutor implements ActionExecutor {
         return done(`${String(moved)} mensagem(ns) de ${text('queue')} reenviadas para ${route}.`);
       }
       case 'notify_oncall': {
+        if (!this.#allowlist.notificationChannel(service, text('channel'))) {
+          return refuse(`Alvo fora da allowlist: canal ${text('channel')} de ${service}.`);
+        }
         if (!this.#backends.notifier) return refuse('notify_oncall em modo live ainda não tem adaptador de notificação (não implementado).');
         await this.#backends.notifier.notify(
           text('channel'),

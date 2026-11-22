@@ -1,6 +1,7 @@
 // Dependências injetadas no grafo. Toda borda com o mundo externo é uma porta substituível em teste.
 import type { BaseCheckpointSaver } from '@langchain/langgraph';
 import type { Tracer } from '@opentelemetry/api';
+import type { ApprovalAnnouncer } from '../chatops/slack-client.js';
 import type { AuditLog } from '../autonomy/audit.js';
 import type { AutonomyGate } from '../autonomy/gate.js';
 import type { ActionExecutor } from '../executor/executor.js';
@@ -25,6 +26,8 @@ export interface InvestigationDeps {
   readonly journal?: InvestigationJournal | undefined;
   /** Reserva atômica de efeito por incidente; o Investigator injeta uma em memória se faltar. */
   readonly effects?: EffectGuard | undefined;
+  /** Avisa o canal do plantão de um pedido de aprovação; falha vira evento de auditoria, nunca bloqueia. */
+  readonly announcer?: ApprovalAnnouncer | undefined;
   /** Runbooks recuperados para o prompt do diagnóstico; só informam, nunca autorizam. */
   readonly runbooks?: RunbookRetriever | undefined;
   /** Teto de custo de LLM por incidente, em dólares; `undefined` desliga o teto. */

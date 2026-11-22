@@ -39,6 +39,25 @@ export function createActNode(deps: InvestigationDeps) {
           actor: 'copilot',
           details: { approvalId: approval.id, action: decision.action?.id, expiresAt: new Date(approval.expiresAt).toISOString() },
         });
+        await deps.announcer
+          ?.announce({
+            approvalId: approval.id,
+            incidentId,
+            service: alert.service,
+            action: decision.action?.id ?? diagnosis.proposedAction.actionId,
+            params: decision.action?.params ?? diagnosis.proposedAction.params,
+            hypothesisId: diagnosis.hypothesisId,
+            confidence: diagnosis.confidence,
+            expiresAt: new Date(approval.expiresAt).toISOString(),
+          })
+          .catch((error: unknown) =>
+            deps.audit.append({
+              incidentId,
+              event: 'chatops_notification_failed',
+              actor: 'copilot',
+              details: { approvalId: approval.id, message: (error as Error).message },
+            }),
+          );
         return { outcome: 'awaiting_approval',
           approvalId: approval.id,
           approvalExpiresAt: new Date(approval.expiresAt).toISOString(),

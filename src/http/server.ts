@@ -3,6 +3,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Registry } from 'prom-client';
+import { InteractionPayloadSchema, type SlackInteractionHandler } from '../chatops/slack-interactions.js';
+import { SIGNATURE_TOLERANCE_SECONDS, slackResponseUrlOnly, verifySlackSignature, type ReplayGuard, type ResponseUrlPolicy } from '../chatops/signature.js';
 import { z } from 'zod';
 import { AlertmanagerWebhookSchema, firingAlerts, InvalidAlertError, type Alert } from '../domain/alert.js';
 import { verifyChain, type AuditLog } from '../autonomy/audit.js';
@@ -14,6 +16,7 @@ import type { RollbackService } from '../incident/rollback-service.js';
 import type { ApprovalQueue } from '../incident/approvals.js';
 import type { IncidentRepository } from '../incident/incidents.js';
 import type { PlaybookRegistry } from '../playbooks/registry.js';
+import type { FetchLike } from '../shared/fetch.js';
 import type { Logger } from '../telemetry/logger.js';
 import { budgetView, playbooksView, policyView, type SourceInfo } from './read-models.js';
 
@@ -55,6 +58,18 @@ export interface ServerDeps {
   readonly registry: Registry;
   readonly logger: Logger;
   readonly webhookToken: string;
+  /** Aprovação por Slack (ADR 0019); ausente = rota desligada. */
+  readonly chatops?:
+    | {
+        readonly signingSecret: string;
+        readonly handler: SlackInteractionHandler;
+        readonly replay: ReplayGuard;
+        readonly nowSeconds?: () => number;
+        /** Quem pode receber a resposta; só o Slack por padrão (configurável apenas para teste). */
+        readonly responseUrlAllowed?: ResponseUrlPolicy;
+        readonly fetch?: FetchLike;
+      }
+    | undefined;
   /** Agenda a investigação fora do ciclo da requisição; o Alertmanager não espera o LLM. */
   readonly schedule?: (task: () => Promise<unknown>) => void;
 }
@@ -100,6 +115,51 @@ export function createHttpServer(deps: ServerDeps): Server {
       for (const alert of alerts) schedule(() => deps.investigate(alert));
       deps.logger.info({ groupKey: payload.data.groupKey, accepted: alerts.length }, 'webhook recebido');
       return json(res, 202, { accepted: alerts.length });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/chatops/slack/interactions' && deps.chatops) {
+      const raw = await readRaw(req);
+      const checked = verifySlackSignature({
+        secret: deps.chatops.signingSecret,
+        timestamp: header(req, 'x-slack-request-timestamp'),
+        signature: header(req, 'x-slack-signature'),
+        rawBody: raw,
+        nowSeconds: deps.chatops.nowSeconds?.() ?? Math.floor(Date.now() / 1000),
+      });
+      if (!checked.ok) {
+        deps.logger.warn({ reason: checked.reason }, 'assinatura do Slack recusada');
+        throw new HttpError(401, 'Assinatura inválida.');
+      }
+      // Anti-replay: a mesma assinatura só vale uma vez dentro da janela de tolerância do carimbo.
+      if (!(await deps.chatops.replay.firstSeen(header(req, 'x-slack-signature') ?? '', SIGNATURE_TOLERANCE_SECONDS * 2000))) {
+        throw new HttpError(401, 'Requisição repetida.');
+      }
+      const form = new URLSearchParams(raw).get('payload');
+      const parsed = InteractionPayloadSchema.safeParse(parseJsonOrNull(form));
+      if (!parsed.success) throw new HttpError(400, 'Payload de interação inválido.');
+      const target = new URL(parsed.data.response_url);
+      if (!(deps.chatops.responseUrlAllowed ?? slackResponseUrlOnly)(target)) throw new HttpError(400, 'response_url fora do Slack.');
+      // O Slack exige o ack em até 3 s e ignora o corpo dele: a decisão (que pode chamar o cluster)
+      // roda depois e a resposta ao usuário vai por POST ao response_url.
+      res.writeHead(200).end();
+      const post = deps.chatops.fetch ?? ((input, init) => fetch(input, init));
+      const say = (text: string | object) =>
+        post(target.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(typeof text === 'string' ? { response_type: 'ephemeral', replace_original: false, text } : text),
+          signal: AbortSignal.timeout(10_000),
+        });
+      const handler = deps.chatops.handler;
+      void handler
+        .handle(parsed.data)
+        .then((reply) => say(reply))
+        .catch((error: unknown) => {
+          deps.logger.error({ err: error }, 'falha ao tratar interação do Slack');
+          return say('Não foi possível concluir a decisão; verifique o painel e a trilha de auditoria.');
+        })
+        .catch((error: unknown) => deps.logger.error({ err: error }, 'falha ao responder ao Slack'));
+      return;
     }
 
     if (req.method === 'GET' && url.pathname === '/config') return json(res, 200, deps.config);
@@ -241,7 +301,29 @@ async function requireOperator(req: IncomingMessage, authenticator: OperatorAuth
   return operator;
 }
 
+const parseJsonOrNull = (text: string | null): unknown => {
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+};
+
+const header = (req: IncomingMessage, name: string): string | undefined => {
+  const value = req.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+};
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
+  try {
+    return JSON.parse(await readRaw(req));
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, 'Corpo não é JSON válido.');
+  }
+}
+
+async function readRaw(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
@@ -249,11 +331,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
     if (size > MAX_BODY_BYTES) throw new HttpError(413, 'Corpo maior que o permitido.');
     chunks.push(chunk as Buffer);
   }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch {
-    throw new HttpError(400, 'Corpo não é JSON válido.');
-  }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
