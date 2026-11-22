@@ -27,6 +27,8 @@ export type LlmEnv = z.infer<typeof LlmEnvSchema>;
 export const EnvSchema = z
   .object({
     ...LlmEnvShape,
+    /** Teto de custo de LLM por incidente, em dólares (ADR 0016). `0` não é aceito: use um valor positivo. */
+    LLM_MAX_COST_USD_PER_INCIDENT: z.coerce.number().positive().max(100).default(0.25),
     PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
     PROMETHEUS_URL: z.url().default('http://localhost:9090'),
@@ -59,6 +61,8 @@ export const EnvSchema = z
     OIDC_AUDIENCE: z.string().min(1).default('ops-copilot'),
     OIDC_JWKS_URL: z.url().optional(),
     /** Cliente público (PKCE) que o painel usa para o login OIDC. */
+    /** Papel do emissor OIDC (claim `roles` ou `realm_access.roles`) que concede o perfil de aprovador. */
+    OIDC_APPROVER_ROLE: z.string().min(1).default('ops-copilot-approver'),
     OIDC_CLIENT_ID: z.string().min(1).default('ops-copilot-web'),
     /** Endereço do Jaeger visto pelo navegador, para o link do trace de cada investigação. */
     JAEGER_PUBLIC_URL: z.url().optional(),
@@ -77,7 +81,7 @@ export const EnvSchema = z
     if (env.OPERATOR_TOKENS) {
       try {
         const tokens = parseOperatorTokens(env.OPERATOR_TOKENS);
-        if ([...tokens.values()].includes(env.WEBHOOK_TOKEN)) {
+        if ([...tokens.values()].some((credential) => credential.token === env.WEBHOOK_TOKEN)) {
           ctx.addIssue({ code: 'custom', path: ['OPERATOR_TOKENS'], message: 'nenhum token pode ser igual a WEBHOOK_TOKEN' });
         }
       } catch (error) {

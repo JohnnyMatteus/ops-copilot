@@ -28,3 +28,5 @@ Aprovar, recusar e cancelar mudam o que o copiloto faz em produção, e a trilha
 
 - **Sessão com cookie no próprio copiloto:** exigiria armazenar sessão, CSRF e logout; o bearer sem estado atende e mantém o OIDC como caminho único para produção.
 - **Só OIDC:** exigiria subir um Keycloak para qualquer demonstração; o token de dev mantém `make up` autônomo.
+
+> Atualização (ADR 0016): `OPERATOR_TOKENS` aceita o sufixo `:approver`; sem ele o operador é leitor.

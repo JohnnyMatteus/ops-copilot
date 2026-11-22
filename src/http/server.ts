@@ -8,7 +8,7 @@ import { AlertmanagerWebhookSchema, firingAlerts, InvalidAlertError, type Alert 
 import { verifyChain, type AuditLog } from '../autonomy/audit.js';
 import type { ActionBudget } from '../autonomy/budget.js';
 import type { AutonomyPolicy } from '../autonomy/policy.js';
-import type { Operator, OperatorAuthenticator } from '../auth/operator.js';
+import { ForbiddenError, type Operator, type OperatorAuthenticator } from '../auth/operator.js';
 import { ReasonRequiredError, type ApprovalService } from '../incident/approval-service.js';
 import type { RollbackService } from '../incident/rollback-service.js';
 import type { ApprovalQueue } from '../incident/approvals.js';
@@ -215,6 +215,7 @@ export function createHttpServer(deps: ServerDeps): Server {
   return createServer((req, res) => {
     routes(req, res).catch((error: unknown) => {
       if (error instanceof HttpError) return json(res, error.status, { error: error.message });
+      if (error instanceof ForbiddenError) return json(res, 403, { error: error.message });
       if (error instanceof ReasonRequiredError) return json(res, 400, { error: error.message });
       if (error instanceof InvalidAlertError) return json(res, 422, { error: error.message });
       deps.logger.error({ err: error, path: req.url }, 'erro não tratado');

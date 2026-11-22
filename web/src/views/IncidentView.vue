@@ -2,7 +2,7 @@
 import { mdiArrowLeft, mdiOpenInNew } from '@mdi/js';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
-import { useConfig, useIncident, usePlaybooks } from '@/api/queries';
+import { useCanApprove, useConfig, useIncident, usePlaybooks } from '@/api/queries';
 import type { Signal } from '@/api/schemas';
 import CheckLines from '@/components/signature/CheckLines.vue';
 import DeadlineClock from '@/components/signature/DeadlineClock.vue';
@@ -23,6 +23,7 @@ const incident = useIncident(id);
 const playbooks = usePlaybooks();
 const config = useConfig();
 const clock = useClock();
+const canApprove = useCanApprove();
 
 const data = computed(() => incident.data.value);
 const status = computed(() => (data.value ? statusOf(data.value, clock.value) : null));
@@ -160,7 +161,10 @@ function describe(signal: Signal): string {
             </template>
 
             <div class="mt-4">
-              <template v-if="status === 'awaiting' && data.approvalId">
+              <template v-if="status === 'awaiting' && data.approvalId && !canApprove">
+                <v-alert type="info" role="status">Seu papel é leitor: só quem tem o papel de aprovador decide este pedido.</v-alert>
+              </template>
+              <template v-else-if="status === 'awaiting' && data.approvalId">
                 <h3 class="label mb-2">Decisão</h3>
                 <DecisionPanel
                   :approval-id="data.approvalId"
@@ -190,7 +194,7 @@ function describe(signal: Signal): string {
               </p>
               <p class="mt-0">Motivo: {{ data.rollback.reason }}</p>
             </div>
-            <div v-else-if="undo" class="mt-4">
+            <div v-else-if="undo && canApprove" class="mt-4">
               <h3 class="label mb-2">Rollback</h3>
               <RollbackPanel :incident-id="data.incidentId" :undo-action="undo.actionId" :summary="(data.execution ?? data.resolution?.execution)?.detail ?? ''" />
             </div>

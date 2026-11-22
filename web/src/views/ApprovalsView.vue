@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useApprovals } from '@/api/queries';
+import { useApprovals, useCanApprove } from '@/api/queries';
 import DecisionPanel from '@/components/DecisionPanel.vue';
 import CheckLines from '@/components/signature/CheckLines.vue';
 import DeadlineClock from '@/components/signature/DeadlineClock.vue';
@@ -8,6 +8,7 @@ import { requiresServiceConfirmation } from '@/domain/approval';
 import { dateTime, percent } from '@/domain/format';
 
 const approvals = useApprovals();
+const canApprove = useCanApprove();
 // Prazo mais curto primeiro: é o que vence antes.
 const rows = computed(() => [...(approvals.data.value ?? [])].sort((a, b) => Date.parse(a.expiresAt) - Date.parse(b.expiresAt)));
 </script>
@@ -56,7 +57,8 @@ const rows = computed(() => [...(approvals.data.value ?? [])].sort((a, b) => Dat
           </p>
         </div>
         <div class="decide">
-          <DecisionPanel :approval-id="approval.id" :incident-id="approval.incidentId" :service="approval.service" :action="approval.action" />
+          <p v-if="!canApprove" class="medium mt-0" data-test="reader-note">Seu papel é leitor: só quem tem o papel de aprovador decide.</p>
+          <DecisionPanel v-else :approval-id="approval.id" :incident-id="approval.incidentId" :service="approval.service" :action="approval.action" />
         </div>
       </div>
     </article>

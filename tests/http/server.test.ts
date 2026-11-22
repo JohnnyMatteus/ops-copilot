@@ -17,6 +17,7 @@ import { firing, webhookPayload } from '../helpers/alertmanager.js';
 const WEBHOOK_TOKEN = 'webhook-token-de-teste-123';
 const PLANTAO_TOKEN = 'operador-plantao-de-teste-456';
 const LIDER_TOKEN = 'operador-lider-de-teste-789';
+const LEITOR_TOKEN = 'operador-leitor-de-teste-000';
 const auth = (token: string) => ({ headers: { Authorization: `Bearer ${token}` } });
 
 let server: Server | undefined;
@@ -39,8 +40,9 @@ async function start() {
     rollbackService: new RollbackService({ ...setup, executor: setup.deps.executor }),
     authenticator: new StaticTokenAuthenticator(
       new Map([
-        ['plantonista@example.com', PLANTAO_TOKEN],
-        ['lider@example.com', LIDER_TOKEN],
+        ['plantonista@example.com', { token: PLANTAO_TOKEN, role: 'approver' as const }],
+        ['lider@example.com', { token: LIDER_TOKEN, role: 'approver' as const }],
+        ['leitor@example.com', { token: LEITOR_TOKEN, role: 'reader' as const }],
       ]),
     ),
     policy: await realPolicy(),
@@ -106,7 +108,7 @@ describe('servidor HTTP', () => {
   it('/config é público e /me devolve quem está autenticado', async () => {
     const { call } = await start();
     expect(await (await call('/config')).json()).toMatchObject({ executionMode: 'dry-run', tokenLogin: true, oidc: null });
-    expect(await (await call('/me', auth(LIDER_TOKEN))).json()).toEqual({ email: 'lider@example.com', name: 'lider', via: 'token' });
+    expect(await (await call('/me', auth(LIDER_TOKEN))).json()).toEqual({ email: 'lider@example.com', name: 'lider', via: 'token', role: 'approver' });
   });
 
   async function pendingPayments(setup: Awaited<ReturnType<typeof start>>) {
@@ -242,6 +244,17 @@ describe('servidor HTTP', () => {
     expect((await call('/healthz')).status).toBe(200);
     const metrics = await call('/metrics');
     expect(await metrics.text()).toContain('ops_copilot_incidents_total');
+  });
+
+  it('leitor consulta, mas aprovar, recusar, cancelar e reverter dão 403 sem efeito', async () => {
+    const { call, approvals } = await start();
+    const id = '00000000-0000-4000-8000-000000000009';
+    expect((await call('/incidents', auth(LEITOR_TOKEN))).status).toBe(200);
+    expect(await (await call('/me', auth(LEITOR_TOKEN))).json()).toMatchObject({ role: 'reader' });
+    expect((await call(`/approvals/${id}`, post(LEITOR_TOKEN, { decision: 'approve' }))).status).toBe(403);
+    expect((await call(`/incidents/${id}/cancel`, post(LEITOR_TOKEN, { reason: 'teste' }))).status).toBe(403);
+    expect((await call(`/incidents/${id}/rollback`, post(LEITOR_TOKEN, { reason: 'teste' }))).status).toBe(403);
+    expect(await approvals.list()).toEqual([]);
   });
 
   it('POST /incidents/:id/rollback devolve 404 para incidente desconhecido e 400 sem motivo', async () => {

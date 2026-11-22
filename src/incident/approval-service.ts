@@ -2,7 +2,7 @@
 // credencial do operador (ADR 0012), é registrada na trilha de auditoria e no incidente (ADR 0013).
 import type { AuditLog } from '../autonomy/audit.js';
 import type { AutonomyGate, Decision } from '../autonomy/gate.js';
-import type { Operator } from '../auth/operator.js';
+import { requireApprover, type Operator } from '../auth/operator.js';
 import type { ActionExecutor, ExecutionResult } from '../executor/executor.js';
 import type { CopilotMetrics } from '../telemetry/metrics.js';
 import type { ApprovalQueue, PendingApproval } from './approvals.js';
@@ -59,6 +59,7 @@ export class ApprovalService {
   }
 
   async resolve(approvalId: string, operator: Operator, decision: ApprovalDecision): Promise<ApprovalOutcome> {
+    requireApprover(operator);
     const reason = decision.reason?.trim() || null;
     if (!decision.approve && !reason) throw new ReasonRequiredError();
     const lookup = await this.#approvals.take(approvalId);
@@ -69,6 +70,7 @@ export class ApprovalService {
   }
 
   async cancel(incidentId: string, operator: Operator, reason: string): Promise<CancelOutcome> {
+    requireApprover(operator);
     const report = await this.#incidents.get(incidentId);
     if (!report) return { status: 'not_found' };
     if (report.resolution) return { status: 'not_cancellable', reason: 'O incidente já tem decisão humana.' };

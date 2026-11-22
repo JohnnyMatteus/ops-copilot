@@ -79,3 +79,11 @@ describe('RollbackPanel', () => {
     wrapper.unmount();
   });
 });
+
+describe('papéis', () => {
+  it('OperatorSchema assume leitor quando o servidor não informa o papel', async () => {
+    const { OperatorSchema } = await import('@/api/schemas');
+    expect(OperatorSchema.parse({ email: 'a@example.com', name: 'a', via: 'token' }).role).toBe('reader');
+    expect(OperatorSchema.parse({ email: 'a@example.com', name: 'a', via: 'token', role: 'approver' }).role).toBe('approver');
+  });
+});

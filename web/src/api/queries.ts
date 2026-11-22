@@ -108,3 +108,9 @@ export const useRollback = () =>
   useDecisionMutation(({ incidentId, reason }: { incidentId: string; reason: string }) =>
     post(OutcomeResponseSchema, `/incidents/${incidentId}/rollback`, { reason }),
   );
+
+/** Só o aprovador vê os controles de decisão; o servidor continua sendo quem recusa com 403. */
+export function useCanApprove() {
+  const me = useMe();
+  return computed(() => me.data.value?.role === 'approver');
+}

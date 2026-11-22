@@ -29,7 +29,7 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       LLM_BASE_URL: ${COPILOT_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:-dev-only-webhook-token-change-me}
-      OPERATOR_TOKENS: ${OPERATOR_TOKENS:-plantonista@example.com=dev-only-operador-plantao,lider@example.com=dev-only-operador-lider}
+      OPERATOR_TOKENS: ${OPERATOR_TOKENS:-plantonista@example.com=dev-only-operador-plantao:approver,lider@example.com=dev-only-operador-lider:approver,leitor@example.com=dev-only-operador-leitor}
       GIT_COMMIT: ${GIT_COMMIT:-desconhecido}
       JAEGER_PUBLIC_URL: http://localhost:${JAEGER_UI_PORT:-16686}
       EXECUTION_MODE: dry-run
