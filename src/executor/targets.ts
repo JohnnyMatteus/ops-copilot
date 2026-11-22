@@ -22,6 +22,8 @@ export const ExecutorTargetsSchema = z.strictObject({
     )
     .default({}),
   featureFlags: z.record(z.string().min(1), z.array(z.string().regex(/^[a-z0-9_.-]{1,64}$/)).min(1)).default({}),
+  /** Canais que `notify_oncall` pode avisar, por serviço: o canal nunca vem só do playbook. */
+  notifications: z.record(z.string().min(1), z.array(z.string().regex(/^#[a-z0-9-]{1,80}$/)).min(1)).default({}),
   /** Cada DLQ declara para qual fila volta: o destino nunca vem do LLM. */
   dlq: z
     .record(
@@ -57,6 +59,10 @@ export class TargetAllowlist {
 
   featureFlag(service: string, flag: string): boolean {
     return own(this.#targets.featureFlags, service)?.includes(flag) ?? false;
+  }
+
+  notificationChannel(service: string, channel: string): boolean {
+    return own(this.#targets.notifications, service)?.includes(channel) ?? false;
   }
 
   /** Fila de destino do replay, ou `null` se a DLQ não estiver liberada para o serviço. */

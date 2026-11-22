@@ -24,10 +24,12 @@ const sign = (body: string, timestamp = NOW, secret = SECRET) =>
   `v0=${createHmac('sha256', secret).update(`v0:${String(timestamp)}:${body}`).digest('hex')}`;
 
 /** Corpo no formato real do Slack: form-urlencoded com `payload=<json>`. */
-const interactionBody = (userId: string, actionId: string, value: string) =>
+const RESPONSE_URL = 'https://hooks.slack.com/actions/T0EXAMPLE/1234567890/AbCdEfGhIjKl';
+const interactionBody = (userId: string, actionId: string, value: string, responseUrl = RESPONSE_URL) =>
   new URLSearchParams({
     payload: JSON.stringify({
       type: 'block_actions',
+      response_url: responseUrl,
       user: { id: userId, username: 'fulana' },
       team: { id: 'T0EXAMPLE' },
       actions: [{ action_id: actionId, block_id: 'b1', value, type: 'button' }],
@@ -84,15 +86,24 @@ describe('mapa de usuários', () => {
 let server: Server | undefined;
 afterEach(() => new Promise<void>((resolve) => (server ? server.close(() => resolve()) : resolve())));
 
-async function start() {
+async function start(options: { hideFromList?: boolean; slow?: boolean } = {}) {
   const setup = await testDeps({ llm: new FakeLlmClient([]), metricsSource: new FixtureMetricsSource({}), traceSource: new FixtureTraceSource({}) });
   const approvalService = new ApprovalService({ ...setup, executor: setup.deps.executor });
+  // Índice perdido: a listagem não vê o pedido, mas `take` ainda o acha pela chave.
+  const visible = options.hideFromList ? { ...setup.approvals, request: setup.approvals.request.bind(setup.approvals), take: setup.approvals.take.bind(setup.approvals), list: async () => [] } : setup.approvals;
   const handler = new SlackInteractionHandler({
     users: parseSlackUsers('U0APPROVER=ana@example.com:approver,U0READER=bia@example.com'),
-    approvals: setup.approvals,
+    approvals: visible,
     approvalService,
     audit: setup.audit,
   });
+  const replies: { url: string; text: string }[] = [];
+  const slackFetch = async (url: string, init: RequestInit) => {
+    replies.push({ url, text: (JSON.parse(init.body as string) as { text: string }).text });
+    return new Response('ok');
+  };
+  const realHandle = handler.handle.bind(handler);
+  if (options.slow) handler.handle = async (payload) => (await new Promise((resolve) => setTimeout(resolve, 300)), realHandle(payload));
   server = createHttpServer({
     investigate: async () => undefined,
     approvals: setup.approvals,
@@ -110,7 +121,7 @@ async function start() {
     registry: setup.metrics.registry,
     logger: silentLogger(),
     webhookToken: 'webhook-token-de-teste-123',
-    chatops: { signingSecret: SECRET, handler, replay: new InMemoryReplayGuard(), nowSeconds: () => NOW },
+    chatops: { signingSecret: SECRET, handler, replay: new InMemoryReplayGuard(), nowSeconds: () => NOW, fetch: slackFetch },
   });
   await new Promise<void>((resolve) => server?.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
@@ -133,16 +144,25 @@ async function start() {
       confidence: 1,
       proposal: { actionId, params: {} },
     });
-  return { ...setup, send, pendingApproval };
+  /** Espera a resposta assíncrona ao response_url (o ack HTTP não leva texto). */
+  const nextReply = async (): Promise<{ url: string; text: string }> => {
+    for (let attempt = 0; attempt < 100 && replies.length === 0; attempt++) await new Promise((resolve) => setTimeout(resolve, 10));
+    const [first] = replies.splice(0, 1);
+    if (!first) throw new Error('nenhuma resposta ao response_url');
+    return first;
+  };
+  return { ...setup, send, pendingApproval, nextReply, handler };
 }
 
 describe('aprovação por Slack', () => {
   it('aprovador mapeado aprova pelo botão: executa e a trilha registra o e-mail mapeado e o canal slack', async () => {
-    const { send, pendingApproval, audit, approvals } = await start();
+    const { send, pendingApproval, audit, approvals, nextReply } = await start();
     const pending = await pendingApproval();
     const response = await send(interactionBody('U0APPROVER', 'approval_approve', pending.id));
     expect(response.status).toBe(200);
-    expect(((await response.json()) as { text: string }).text).toMatch(/Aprovado por ana@example.com/);
+    const reply = await nextReply();
+    expect(reply.url).toBe(RESPONSE_URL);
+    expect(reply.text).toMatch(/Aprovado por ana@example.com/);
     expect(await approvals.list()).toEqual([]);
     const granted = (await audit.records()).find((record) => record.event === 'approval_granted');
     expect(granted).toMatchObject({ actor: 'human:ana@example.com', details: { via: 'slack' } });
@@ -159,22 +179,53 @@ describe('aprovação por Slack', () => {
   });
 
   it('leitor e usuário não mapeado não decidem: o pedido segue pendente e a negativa é auditada', async () => {
-    const { send, pendingApproval, audit, approvals } = await start();
+    const { send, pendingApproval, audit, approvals, nextReply } = await start();
     const pending = await pendingApproval();
     for (const user of ['U0READER', 'U0STRANGER']) {
-      const response = await send(interactionBody(user, 'approval_approve', pending.id), {});
-      expect(((await response.json()) as { text: string }).text).toMatch(/papel de aprovador/);
+      expect((await send(interactionBody(user, 'approval_approve', pending.id))).status).toBe(200);
+      expect((await nextReply()).text).toMatch(/papel de aprovador/);
     }
     expect(await approvals.list()).toHaveLength(1);
     expect((await audit.records()).filter((record) => record.event === 'chatops_denied')).toHaveLength(2);
   });
 
   it('ação com dinheiro não é aprovada por botão: exige o painel', async () => {
-    const { send, pendingApproval, approvals } = await start();
+    const { send, pendingApproval, approvals, nextReply } = await start();
     const pending = await pendingApproval('replay_dlq_batch', 'payments-events-go', 'payments-dlq-backlog');
-    const response = await send(interactionBody('U0APPROVER', 'approval_approve', pending.id));
-    expect(((await response.json()) as { text: string }).text).toMatch(/painel/);
+    await send(interactionBody('U0APPROVER', 'approval_approve', pending.id));
+    expect((await nextReply()).text).toMatch(/painel/);
     expect(await approvals.list()).toHaveLength(1);
+  });
+
+  it('falha fechado: com o pedido fora da listagem (índice perdido), a aprovação não prossegue mesmo com a chave presente', async () => {
+    const { send, pendingApproval, approvals, nextReply } = await start({ hideFromList: true });
+    const pending = await pendingApproval('replay_dlq_batch', 'payments-events-go', 'payments-dlq-backlog');
+    await send(interactionBody('U0APPROVER', 'approval_approve', pending.id));
+    expect((await nextReply()).text).toMatch(/não encontrado/);
+    expect(await approvals.list()).toHaveLength(1);
+  });
+
+  it('o ack sai antes da decisão terminar e o resultado chega depois pelo response_url', async () => {
+    const { send, pendingApproval, nextReply } = await start({ slow: true });
+    const pending = await pendingApproval();
+    const startedAt = Date.now();
+    const response = await send(interactionBody('U0APPROVER', 'approval_approve', pending.id));
+    expect(Date.now() - startedAt).toBeLessThan(250);
+    expect(await response.text()).toBe('');
+    expect((await nextReply()).text).toMatch(/Aprovado por/);
+  });
+
+  it('erro depois do ack é avisado pelo mesmo caminho e o response_url fora do Slack é recusado antes de qualquer decisão', async () => {
+    const { send, pendingApproval, handler, approvals, nextReply } = await start();
+    const pending = await pendingApproval();
+    const outside = await send(interactionBody('U0APPROVER', 'approval_approve', pending.id, 'https://exemplo.test/hook'));
+    expect(outside.status).toBe(400);
+    expect((await send(interactionBody('U0APPROVER', 'approval_approve', pending.id, 'http://hooks.slack.com/x'))).status).toBe(400);
+    expect(await approvals.list()).toHaveLength(1);
+
+    handler.handle = async () => Promise.reject(new Error('cluster fora'));
+    expect((await send(interactionBody('U0APPROVER', 'approval_approve', pending.id))).status).toBe(200);
+    expect((await nextReply()).text).toMatch(/Não foi possível concluir/);
   });
 
   it('assinatura inválida, carimbo velho e payload fora do formato não chegam ao handler', async () => {
@@ -217,6 +268,18 @@ describe('cliente do Slack', () => {
     hypothesisId: 'noisy_tenant',
     confidence: 0.9,
     expiresAt: '2026-11-20T12:30:00.000Z',
+  });
+
+  it('escapa &, < e > dos valores do alerta: nada vira link nem <!channel>', async () => {
+    const { calls, fetch } = capture();
+    const client = new SlackClient({ token: 'xoxb-dev-only-token-0123', approvalChannel: '#aprovacoes', fetch });
+    await client.announce({ ...announcement('saas-multitenant', 'scale_deployment'), service: '<!channel> & <https://evil.test|clique>', params: { x: '<!here>' } });
+    await client.notify('#plantao', 'Incidente <!channel> em <@U123> & cia');
+    const sent = JSON.stringify(calls[0]?.body);
+    expect(sent).not.toContain('<!channel>');
+    expect(sent).not.toContain('<https://evil.test');
+    expect(sent).toContain('&lt;!channel&gt; &amp; &lt;https://evil.test|clique&gt;');
+    expect(calls[1]?.body.text).toBe('Incidente &lt;!channel&gt; em &lt;@U123&gt; &amp; cia');
   });
 
   it('anuncia o pedido com botões e o id da aprovação; ação com dinheiro sai sem botões', async () => {

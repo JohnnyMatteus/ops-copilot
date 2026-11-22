@@ -8,6 +8,10 @@ kubernetes:
   saas-multitenant: { namespace: saas, deployments: [saas-api] }
 featureFlags:
   saas-multitenant: [reports.heavy_export]
+notifications:
+  payments-events-go: ['#plantao-pagamentos']
+  kafka-telemetry: ['#plantao-telemetria']
+  saas-multitenant: ['#plantao-agendamento']
 dlq:
   payments-events-go:
     - { queue: payments.events.dlq, replayTo: payments.events }

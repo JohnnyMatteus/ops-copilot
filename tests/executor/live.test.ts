@@ -16,6 +16,7 @@ const allowlist = new TargetAllowlist(
     kind: 'ExecutorTargets',
     kubernetes: { 'saas-multitenant': { namespace: 'saas', deployments: ['saas-api'] } },
     featureFlags: { 'saas-multitenant': ['reports.heavy_export'] },
+    notifications: { 'saas-multitenant': ['#plantao-agendamento'] },
     dlq: { 'payments-events-go': [{ queue: 'payments.events.dlq', replayTo: 'payments.events' }] },
   }),
 );
@@ -124,6 +125,13 @@ describe('LiveExecutor', () => {
     expect(result.status).toBe('executed');
     expect(sent[0]?.[0]).toBe('#plantao-agendamento');
     expect(sent[0]?.[1]).toContain('inc-1');
+    // Canal fora da allowlist do serviço, ou de outro serviço, nunca chega ao notificador.
+    for (const [channel, service] of [['#geral', 'saas-multitenant'], ['#plantao-agendamento', 'payments-events-go'], ['#plantao-agendamento', 'desconhecido']] as const) {
+      const refused = await executor.execute({ id: 'notify_oncall', params: { channel }, reversible: true }, { ...ctx, service });
+      expect(refused.status).toBe('failed');
+      expect(refused.detail).toMatch(/allowlist/);
+    }
+    expect(sent).toHaveLength(1);
   });
 
   it('flag: desliga, guarda como religar e é idempotente', async () => {

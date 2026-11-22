@@ -5,6 +5,9 @@ import type { NotifierPort } from '../executor/ports.js';
 import type { FetchLike } from '../shared/fetch.js';
 import { requiresPanelConfirmation } from './users.js';
 
+/** Em mrkdwn só `&`, `<` e `>` são especiais: sem escapá-los um valor do alerta viraria link ou `<!channel>`. */
+export const escapeMrkdwn = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 export const APPROVE_ACTION_ID = 'approval_approve';
 export const REJECT_ACTION_ID = 'approval_reject';
 
@@ -39,12 +42,12 @@ export class SlackClient implements NotifierPort, ApprovalAnnouncer {
   }
 
   async notify(channel: string, text: string): Promise<void> {
-    await this.#post({ channel, text });
+    await this.#post({ channel, text: escapeMrkdwn(text) });
   }
 
   async announce(item: ApprovalAnnouncement): Promise<void> {
     if (!this.#approvalChannel) throw new Error('SLACK_APPROVAL_CHANNEL não configurado.');
-    const summary = `*Aprovação pendente* em \`${item.service}\`: \`${item.action}\` ${JSON.stringify(item.params)}\nHipótese \`${item.hypothesisId}\` (confiança ${item.confidence.toFixed(2)}). Expira em ${item.expiresAt}.`;
+    const summary = `*Aprovação pendente* em \`${escapeMrkdwn(item.service)}\`: \`${escapeMrkdwn(item.action)}\` ${escapeMrkdwn(JSON.stringify(item.params))}\nHipótese \`${escapeMrkdwn(item.hypothesisId)}\` (confiança ${item.confidence.toFixed(2)}). Expira em ${escapeMrkdwn(item.expiresAt)}.`;
     const panelOnly = requiresPanelConfirmation(item.service, item.action);
     const blocks: unknown[] = [{ type: 'section', text: { type: 'mrkdwn', text: summary } }];
     if (panelOnly) {

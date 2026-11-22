@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Registry } from 'prom-client';
 import { InteractionPayloadSchema, type SlackInteractionHandler } from '../chatops/slack-interactions.js';
-import { SIGNATURE_TOLERANCE_SECONDS, verifySlackSignature, type ReplayGuard } from '../chatops/signature.js';
+import { SIGNATURE_TOLERANCE_SECONDS, slackResponseUrlOnly, verifySlackSignature, type ReplayGuard, type ResponseUrlPolicy } from '../chatops/signature.js';
 import { z } from 'zod';
 import { AlertmanagerWebhookSchema, firingAlerts, InvalidAlertError, type Alert } from '../domain/alert.js';
 import { verifyChain, type AuditLog } from '../autonomy/audit.js';
@@ -16,6 +16,7 @@ import type { RollbackService } from '../incident/rollback-service.js';
 import type { ApprovalQueue } from '../incident/approvals.js';
 import type { IncidentRepository } from '../incident/incidents.js';
 import type { PlaybookRegistry } from '../playbooks/registry.js';
+import type { FetchLike } from '../shared/fetch.js';
 import type { Logger } from '../telemetry/logger.js';
 import { budgetView, playbooksView, policyView, type SourceInfo } from './read-models.js';
 
@@ -64,6 +65,9 @@ export interface ServerDeps {
         readonly handler: SlackInteractionHandler;
         readonly replay: ReplayGuard;
         readonly nowSeconds?: () => number;
+        /** Quem pode receber a resposta; só o Slack por padrão (configurável apenas para teste). */
+        readonly responseUrlAllowed?: ResponseUrlPolicy;
+        readonly fetch?: FetchLike;
       }
     | undefined;
   /** Agenda a investigação fora do ciclo da requisição; o Alertmanager não espera o LLM. */
@@ -133,7 +137,29 @@ export function createHttpServer(deps: ServerDeps): Server {
       const form = new URLSearchParams(raw).get('payload');
       const parsed = InteractionPayloadSchema.safeParse(parseJsonOrNull(form));
       if (!parsed.success) throw new HttpError(400, 'Payload de interação inválido.');
-      return json(res, 200, await deps.chatops.handler.handle(parsed.data));
+      const target = new URL(parsed.data.response_url);
+      if (!(deps.chatops.responseUrlAllowed ?? slackResponseUrlOnly)(target)) throw new HttpError(400, 'response_url fora do Slack.');
+      // O Slack exige o ack em até 3 s e ignora o corpo dele: a decisão (que pode chamar o cluster)
+      // roda depois e a resposta ao usuário vai por POST ao response_url.
+      res.writeHead(200).end();
+      const post = deps.chatops.fetch ?? ((input, init) => fetch(input, init));
+      const say = (text: string | object) =>
+        post(target.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          body: JSON.stringify(typeof text === 'string' ? { response_type: 'ephemeral', replace_original: false, text } : text),
+          signal: AbortSignal.timeout(10_000),
+        });
+      const handler = deps.chatops.handler;
+      void handler
+        .handle(parsed.data)
+        .then((reply) => say(reply))
+        .catch((error: unknown) => {
+          deps.logger.error({ err: error }, 'falha ao tratar interação do Slack');
+          return say('Não foi possível concluir a decisão; verifique o painel e a trilha de auditoria.');
+        })
+        .catch((error: unknown) => deps.logger.error({ err: error }, 'falha ao responder ao Slack'));
+      return;
     }
 
     if (req.method === 'GET' && url.pathname === '/config') return json(res, 200, deps.config);

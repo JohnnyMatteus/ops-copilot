@@ -11,6 +11,8 @@ import { operatorFromSlack, requiresPanelConfirmation } from './users.js';
 
 export const InteractionPayloadSchema = z.object({
   type: z.literal('block_actions'),
+  /** O Slack só mostra ao usuário o que for enviado a este endereço; o corpo do ack é ignorado. */
+  response_url: z.url(),
   user: z.object({ id: z.string().min(1) }),
   actions: z
     .array(z.object({ action_id: z.enum([APPROVE_ACTION_ID, REJECT_ACTION_ID]), value: z.string().uuid() }))
@@ -63,8 +65,13 @@ export class SlackInteractionHandler {
     }
 
     const approve = action.action_id === APPROVE_ACTION_ID;
-    if (approve && pending && requiresPanelConfirmation(pending.gateInput.service, pending.gateInput.proposal.actionId)) {
-      return reply('Esta ação mexe com dinheiro: aprove pelo painel, digitando o nome do serviço.');
+    if (approve) {
+      // Falha fechado: sem ver o pedido na listagem não há como saber se exige o painel, e o `take`
+      // acharia o pedido pela chave e executaria sem a confirmação.
+      if (!pending) return reply('Pedido não encontrado ou já decidido.');
+      if (requiresPanelConfirmation(pending.gateInput.service, pending.gateInput.proposal.actionId)) {
+        return reply('Esta ação mexe com dinheiro: aprove pelo painel, digitando o nome do serviço.');
+      }
     }
 
     const outcome = await this.#service.resolve(approvalId, operator, {

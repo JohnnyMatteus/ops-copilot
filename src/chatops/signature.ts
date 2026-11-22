@@ -61,3 +61,8 @@ export class RedisReplayGuard implements ReplayGuard {
     return (await this.#redis.set(`${this.#prefix}:${key}`, '1', 'PX', ttlMs, 'NX')) === 'OK';
   }
 }
+
+/** O `response_url` do payload só é aceito se apontar para o Slack: ele recebe texto nosso. */
+export type ResponseUrlPolicy = (url: URL) => boolean;
+
+export const slackResponseUrlOnly: ResponseUrlPolicy = (url) => url.protocol === 'https:' && url.hostname === 'hooks.slack.com';

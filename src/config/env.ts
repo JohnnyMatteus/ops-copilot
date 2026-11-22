@@ -6,6 +6,9 @@ import { ExecutionModeSchema } from '../executor/executor.js';
 
 const token = z.string().min(16, 'use pelo menos 16 caracteres');
 
+/** Variável opcional que o compose repassa vazia quando não configurada: vazio vale como ausente. */
+const blankable = <T extends z.ZodType>(schema: T) => z.preprocess((value) => (value === '' ? undefined : value), schema.optional());
+
 const LlmEnvShape = {
   /** `scripted` responde de LLM_SCRIPT_FILE, sem rede: só para demonstração. */
   LLM_PROVIDER: z.enum(['openrouter', 'ollama', 'scripted']).default('ollama'),
@@ -56,11 +59,11 @@ export const EnvSchema = z
     /** Redis onde vivem as filas de DLQ; separado do Redis de estado do copiloto. */
     DLQ_REDIS_URL: z.url().optional(),
     /** ChatOps no Slack (ADR 0019). Sem SLACK_SIGNING_SECRET a rota de interações fica desligada. */
-    SLACK_SIGNING_SECRET: token.optional(),
-    SLACK_USERS: z.string().optional(),
-    SLACK_BOT_TOKEN: z.string().min(16).optional(),
-    SLACK_APPROVAL_CHANNEL: z.string().min(1).optional(),
-    SLACK_API_URL: z.url().default('https://slack.com/api'),
+    SLACK_SIGNING_SECRET: blankable(token),
+    SLACK_USERS: blankable(z.string()),
+    SLACK_BOT_TOKEN: blankable(z.string().min(16)),
+    SLACK_APPROVAL_CHANNEL: blankable(z.string().min(1)),
+    SLACK_API_URL: z.preprocess((value) => (value === '' ? undefined : value), z.url().default('https://slack.com/api')),
     /** Validade do lease de uma investigação, renovado por heartbeat enquanto ela roda (ADR 0018). */
     INVESTIGATION_LEASE_SECONDS: z.coerce.number().int().min(5).max(600).default(30),
     APPROVAL_TTL_MINUTES: z.coerce.number().int().min(1).max(240).default(30),
