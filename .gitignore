@@ -10,6 +10,8 @@ evals/reports/
 *.log
 .DS_Store
 .claude/settings.local.json
+web/node_modules/
+web/dist/
 e2e/evidencia/node_modules/
 e2e/evidencia/test-results/
 e2e/evidencia/playwright-report/
